@@ -1,8 +1,10 @@
 import json
 from inspect import signature
 from pathlib import Path
+from unittest.mock import Mock
 
 import pandas as pd
+import pytest
 
 from LCD.shared.common import merge_parameters, resolve_model
 from LCD.shared.lora import DEFAULT_LORA_HYPERPARAMETERS
@@ -91,10 +93,12 @@ def test_all_stage_entrypoints_default_to_four_models_and_ternary_only() -> None
         assert parameters["models"].default == sweep.ALL_MODELS
         assert parameters["tasks"].default == ("ternary",)
         assert parameters["search_id"].default == "lora_coordinate_imbalanced_val"
+        assert parameters["nruns"].default == 4
     assert (
         signature(run_lora_vs_llm_comparison).parameters["search_id"].default
         == "lora_coordinate_imbalanced_val"
     )
+    assert signature(run_lora_vs_llm_comparison).parameters["nruns"].default == 4
 
 
 def test_ready_score_validation_accepts_ternary_only() -> None:
@@ -104,6 +108,7 @@ def test_ready_score_validation_accepts_ternary_only() -> None:
             "task": "ternary",
             "evaluation_scope": "validation",
             "test_dataset": None,
+            "contradiction_f1": 0.5,
         }
     ]
     rows.extend(
@@ -112,6 +117,7 @@ def test_ready_score_validation_accepts_ternary_only() -> None:
             "task": "ternary",
             "evaluation_scope": scope,
             "test_dataset": dataset,
+            "contradiction_f1": 0.5,
         }
         for dataset in sweep.DATASETS
         for scope in sweep.BENCHMARK_SCOPES
@@ -121,6 +127,23 @@ def test_ready_score_validation_accepts_ternary_only() -> None:
     validated = sweep._validate_ready_scores("qwen", scores, ("ternary",))
 
     pd.testing.assert_frame_equal(validated.reset_index(drop=True), scores)
+
+
+def test_score_validation_requires_contradiction_f1_and_full_test_only() -> None:
+    experiment = {"recipe_id": "recipe", "task": "ternary"}
+    scores = pd.DataFrame(
+        [
+            {"task": "ternary", "evaluation_scope": "validation", "test_dataset": None},
+            {"task": "ternary", "evaluation_scope": "autotest_model", "test_dataset": "Full"},
+        ]
+    )
+    with pytest.raises(ValueError, match="Incomplete score columns"):
+        sweep._validate_experiment_scores(experiment, scores)
+
+    scores["contradiction_f1"] = [0.7, 0.8]
+    scores.loc[1, "test_dataset"] = "Dialogue"
+    with pytest.raises(ValueError, match="Incomplete score rows"):
+        sweep._validate_experiment_scores(experiment, scores)
 
 
 def test_stage_grids_and_inheritance_are_exact() -> None:
@@ -159,7 +182,7 @@ def test_stage_grids_and_inheritance_are_exact() -> None:
     ]
 
 
-def test_winner_uses_validation_not_benchmark() -> None:
+def test_winner_uses_validation_contradiction_f1_not_macro_or_benchmark() -> None:
     state = _state(models=("qwen",), tasks=("ternary",))
     candidates = sweep.build_stage_candidates("target_modules", state)
     sweep._register_stage(state, "target_modules", candidates)
@@ -172,16 +195,22 @@ def test_winner_uses_validation_not_benchmark() -> None:
             [
                 {
                     "recipe_id": recipe_id,
+                    "model_alias": candidate.model_alias,
+                    "task": candidate.task,
                     "evaluation_scope": "validation",
+                    "test_dataset": None,
                     "macro_f1": 0.9 - index * 0.1,
-                    "contradiction_f1": 0.8,
+                    "contradiction_f1": 0.2 + index * 0.3,
                     "invalid_predictions": 0,
                 },
                 {
                     "recipe_id": recipe_id,
-                    "evaluation_scope": "autotest_total",
+                    "model_alias": candidate.model_alias,
+                    "task": candidate.task,
+                    "evaluation_scope": "autotest_model",
+                    "test_dataset": "Full",
                     "macro_f1": 0.1 + index * 0.4,
-                    "contradiction_f1": 0.8,
+                    "contradiction_f1": 0.9 - index * 0.3,
                     "invalid_predictions": 0,
                 },
             ]
@@ -189,7 +218,9 @@ def test_winner_uses_validation_not_benchmark() -> None:
 
     sweep._rank_and_finalize(state, "target_modules", pd.DataFrame(rows))
 
-    assert state["stages"]["target_modules"]["winners"]["qwen:ternary"]["label"] == "qv"
+    assert state["stages"]["target_modules"]["winners"]["qwen:ternary"]["label"] == "all_linear"
+    validation = sweep._stage_frames(state, "target_modules", pd.DataFrame(rows))[1]
+    assert validation.iloc[0]["label"] == "all_linear"
 
 
 def test_adapter_reuse_requires_complete_matching_manifest(tmp_path: Path) -> None:
@@ -230,6 +261,36 @@ def test_latest_checkpoint_uses_highest_numeric_step(tmp_path: Path) -> None:
     assert sweep._latest_checkpoint(tmp_path) == tmp_path / "checkpoint-100"
 
 
+def test_each_lora_model_uses_imbalanced_val_and_full_only(monkeypatch, tmp_path: Path) -> None:
+    state = _state()
+    candidates = sweep.build_stage_candidates("target_modules", state)
+    sweep._register_stage(state, "target_modules", candidates)
+    run_lora = Mock(return_value=pd.DataFrame())
+    monkeypatch.setattr("LCD.shared.lora.run", run_lora)
+    monkeypatch.setattr(sweep, "_adapter_matches", lambda *args: False)
+    monkeypatch.setattr(sweep, "_latest_checkpoint", lambda *args: None)
+
+    for model_alias in sweep.ALL_MODELS:
+        experiment = next(
+            record for record in state["experiments"].values()
+            if record["model_alias"] == model_alias
+        )
+        sweep._run_experiment(
+            experiment,
+            root=tmp_path,
+            artifact_root=tmp_path / "artifacts",
+            result_root=tmp_path / "results",
+            state=state,
+        )
+
+    assert [call.args[0] for call in run_lora.call_args_list] == list(sweep.ALL_MODELS)
+    for call in run_lora.call_args_list:
+        assert call.kwargs["train_path"] == tmp_path / "local/data/classification/train.csv"
+        assert call.kwargs["val_path"] == tmp_path / "local/data/classification/val.csv"
+        assert call.kwargs["selected_datasets"] == ("Full",)
+        assert call.kwargs["benchmark_scopes"] == ("autotest_model",)
+
+
 def test_empty_scores_do_not_complete_a_stage() -> None:
     state = _state(models=("qwen",), tasks=("ternary",))
     candidates = sweep.build_stage_candidates("target_modules", state)
@@ -248,13 +309,7 @@ def test_completed_stage_writes_all_result_sheets(tmp_path: Path) -> None:
             candidate.model_alias, candidate.task, candidate.parameters, state
         )
         state["experiments"][recipe_id]["status"] = "completed"
-        for dataset, scope in (
-            (None, "validation"),
-            ("Dialogue", "autotest_model"),
-            ("Dialogue", "autotest_total"),
-            ("Full", "autotest_model"),
-            ("Full", "autotest_total"),
-        ):
+        for dataset, scope in ((None, "validation"), ("Full", "autotest_model")):
             rows.append(
                 {
                     "recipe_id": recipe_id,
@@ -327,7 +382,7 @@ def test_invocation_attempt_cap_is_enforced(monkeypatch, tmp_path: Path) -> None
         repo_root=tmp_path,
         models=("qwen",),
         tasks=("ternary",),
-        max_attempts_per_run=2,
+        nruns=2,
         max_retries=0,
     )
 
@@ -336,3 +391,55 @@ def test_invocation_attempt_cap_is_enforced(monkeypatch, tmp_path: Path) -> None
     assert sum(record["attempts"] for record in saved["experiments"].values()) == 2
     assert sum(record["status"] == "failed" for record in saved["experiments"].values()) == 2
     assert sum(record["status"] == "pending" for record in saved["experiments"].values()) == 1
+
+    executed = []
+
+    def successful_run(experiment, **kwargs):
+        executed.append(experiment["recipe_id"])
+        return pd.DataFrame(
+            [
+                {
+                    "task": "ternary",
+                    "evaluation_scope": "validation",
+                    "test_dataset": None,
+                    "macro_f1": 0.3,
+                    "contradiction_f1": 0.7,
+                    "invalid_predictions": 0,
+                },
+                {
+                    "task": "ternary",
+                    "evaluation_scope": "autotest_model",
+                    "test_dataset": "Full",
+                    "macro_f1": 0.9,
+                    "contradiction_f1": 0.8,
+                    "invalid_predictions": 0,
+                },
+            ]
+        )
+
+    monkeypatch.setattr(sweep, "_run_experiment", successful_run)
+    for _ in range(2):
+        sweep.run_sweep_stage(
+            "target_modules",
+            search_id="attempt-cap",
+            repo_root=tmp_path,
+            models=("qwen",),
+            tasks=("ternary",),
+            nruns=2,
+            max_retries=0,
+        )
+    saved = json.loads(state_path.read_text(encoding="utf-8"))
+    assert saved["stages"]["target_modules"]["status"] == "completed"
+    assert len(executed) == 3
+    assert {record["status"] for record in saved["experiments"].values()} == {"completed"}
+    assert sorted(record["attempts"] for record in saved["experiments"].values()) == [1, 2, 2]
+
+    sweep.run_sweep_stage(
+        "target_modules",
+        search_id="attempt-cap",
+        repo_root=tmp_path,
+        models=("qwen",),
+        tasks=("ternary",),
+        nruns=2,
+    )
+    assert len(executed) == 3

@@ -542,7 +542,7 @@ def _latest_checkpoint(trainer_dir: Path) -> Path | None:
 
 
 def _validate_experiment_scores(experiment: Mapping[str, Any], scores):
-    required = {"task", "evaluation_scope", "test_dataset"}
+    required = {"task", "evaluation_scope", "test_dataset", "contradiction_f1"}
     if not required.issubset(scores.columns):
         raise ValueError(f"Incomplete score columns for {experiment['recipe_id']}")
     expected = {
@@ -556,6 +556,8 @@ def _validate_experiment_scores(experiment: Mapping[str, Any], scores):
     validation = scores[scores["evaluation_scope"] == "validation"]
     if observed != expected or len(validation) != 1 or len(scores) != 2:
         raise ValueError(f"Incomplete score rows for {experiment['recipe_id']}")
+    if not math.isfinite(_metric(validation.iloc[0]["contradiction_f1"], -math.inf)):
+        raise ValueError(f"Missing validation contradiction F1 for {experiment['recipe_id']}")
     if set(scores["task"].astype(str)) != {experiment["task"]}:
         raise ValueError(f"Wrong task in scores for {experiment['recipe_id']}")
     return scores
@@ -687,7 +689,6 @@ def _rank_and_finalize(
         for candidate in candidates:
             row = _validation_row(scores, candidate["recipe_id"])
             key = (
-                -_metric(row.get("macro_f1"), -math.inf),
                 -_metric(row.get("contradiction_f1"), -math.inf),
                 _metric(row.get("invalid_predictions"), math.inf),
                 int(candidate["order"]),
@@ -720,12 +721,11 @@ def _stage_frames(state: Mapping[str, Any], stage: str, scores):
             [
                 "model_alias_x",
                 "task_x",
-                "macro_f1",
                 "contradiction_f1",
                 "invalid_predictions",
                 "order",
             ],
-            ascending=[True, True, False, False, True, True],
+            ascending=[True, True, False, True, True],
             kind="stable",
         )
         validation["validation_rank"] = validation.groupby(
@@ -739,7 +739,7 @@ def _stage_frames(state: Mapping[str, Any], stage: str, scores):
             ["model_alias_x", "task_x", "test_dataset", "evaluation_scope"],
             sort=False,
             dropna=False,
-        )["macro_f1"].rank(method="min", ascending=False)
+        )["contradiction_f1"].rank(method="min", ascending=False)
     winners = pd.DataFrame(state["stages"][stage].get("winners", {}).values())
     return candidates, validation, benchmark, winners
 
@@ -800,15 +800,15 @@ def run_sweep_stage(
     models: Sequence[str] = ALL_MODELS,
     tasks: Sequence[str] = DEFAULT_SWEEP_TASKS,
     hyperparameters: Mapping[str, Any] | None = None,
-    max_attempts_per_run: int = 6,
+    nruns: int = 4,
     max_retries: int = 1,
     dry_run: bool = False,
 ):
-    """Run or resume one stage of the coordinated local LoRA search."""
+    """Run or resume one stage, attempting at most ``nruns`` recipes per call."""
     if stage not in STAGE_ORDER:
         raise ValueError(f"Unknown sweep stage: {stage}")
-    if max_attempts_per_run < 1:
-        raise ValueError("max_attempts_per_run must be positive")
+    if nruns < 1:
+        raise ValueError("nruns must be positive")
     if max_retries < 0:
         raise ValueError("max_retries cannot be negative")
     if not search_id or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" for character in search_id):
@@ -846,7 +846,7 @@ def run_sweep_stage(
             },
         }
         candidates = build_stage_candidates(stage, mock_state)
-        print_stage_dry_run(stage, candidates, max_attempts_per_run)
+        print_stage_dry_run(stage, candidates, nruns)
         return candidates
 
     if not state_path.is_file() and dry_run:
@@ -862,7 +862,7 @@ def run_sweep_stage(
     )
     candidates = build_stage_candidates(stage, state)
     if dry_run:
-        print_stage_dry_run(stage, candidates, max_attempts_per_run, state=state)
+        print_stage_dry_run(stage, candidates, nruns, state=state)
         return candidates
 
     stage_state = _register_stage(state, stage, candidates)
@@ -896,7 +896,7 @@ def run_sweep_stage(
                 experiment["error"] = "Saved scores were missing or invalid"
         local_attempts = 0
         while (
-            attempts_this_run < max_attempts_per_run
+            attempts_this_run < nruns
             and local_attempts <= max_retries
             and experiment["status"] != "completed"
         ):
@@ -959,7 +959,7 @@ def run_sweep_stage(
                 state["updated_at"] = _utc_now()
                 _atomic_json(state_path, state)
                 _cleanup_cuda(logger)
-        if attempts_this_run >= max_attempts_per_run:
+        if attempts_this_run >= nruns:
             break
     if _stage_complete(state, stage, scores):
         _rank_and_finalize(state, stage, scores)
@@ -983,7 +983,7 @@ def run_sweep_stage(
 def print_stage_dry_run(
     stage: str,
     candidates: Sequence[SweepCandidate],
-    max_attempts_per_run: int,
+    nruns: int,
     *,
     state: Mapping[str, Any] | None = None,
 ) -> None:
@@ -1021,7 +1021,7 @@ def print_stage_dry_run(
     logical = len(candidates)
     print(
         f"Dry run: {stage}, {logical} logical candidates; "
-        f"at most {max_attempts_per_run} workflow attempts per invocation."
+        f"at most {nruns} workflow attempts per invocation."
     )
 
 
@@ -1029,7 +1029,7 @@ def run_llm_comparison(
     *,
     search_id: str = DEFAULT_SEARCH_ID,
     repo_root: str | Path | None = None,
-    max_attempts_per_run: int = 4,
+    nruns: int = 4,
     dry_run: bool = False,
 ):
     """Compare final dropout-stage LoRA winners with matched ready LLMs."""
@@ -1056,8 +1056,8 @@ def run_llm_comparison(
     if dry_run:
         print(f"Dry run: {len(models)} ready-LLM evaluations: {', '.join(models)}")
         return models
-    if max_attempts_per_run < 1:
-        raise ValueError("max_attempts_per_run must be positive")
+    if nruns < 1:
+        raise ValueError("nruns must be positive")
     os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
     _preflight(root, models, tasks, gpu=True)
@@ -1103,7 +1103,7 @@ def run_llm_comparison(
             except ValueError:
                 record["status"] = "interrupted"
                 record["error"] = "Saved scores were missing or invalid"
-        if attempts >= max_attempts_per_run:
+        if attempts >= nruns:
             break
         attempts += 1
         record.update(

@@ -23,7 +23,7 @@ def run_lora_lr_experiments(
     models: Sequence[str] = ALL_MODELS,
     tasks: Sequence[str] = DEFAULT_SWEEP_TASKS,
     hyperparameters: Mapping[str, Any] | None = None,
-    max_attempts_per_run: int = 6,
+    nruns: int = 4,
     max_retries: int = 1,
     dry_run: bool = False,
 ):
@@ -35,7 +35,7 @@ def run_lora_lr_experiments(
         models=models,
         tasks=tasks,
         hyperparameters=hyperparameters,
-        max_attempts_per_run=max_attempts_per_run,
+        nruns=nruns,
         max_retries=max_retries,
         dry_run=dry_run,
     )
@@ -49,7 +49,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--tasks", nargs="+", choices=ALL_TASKS, default=DEFAULT_SWEEP_TASKS
     )
-    parser.add_argument("--max-attempts-per-run", type=int, default=6)
+    parser.add_argument("--nruns", type=int, default=4)
     parser.add_argument("--max-retries", type=int, default=1)
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
@@ -62,7 +62,7 @@ if __name__ == "__main__":
         repo_root=arguments.repo_root,
         models=arguments.models,
         tasks=arguments.tasks,
-        max_attempts_per_run=arguments.max_attempts_per_run,
+        nruns=arguments.nruns,
         max_retries=arguments.max_retries,
         dry_run=arguments.dry_run,
     )
