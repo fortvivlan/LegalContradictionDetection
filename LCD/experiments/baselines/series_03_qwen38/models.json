@@ -1,0 +1,12 @@
+{
+  "models": [
+    {
+      "name": "qwen3.8-27b-q4_k_m-ternary",
+      "family": "base_llm",
+      "backend": "llama_cpp",
+      "tasks": ["ternary"],
+      "model_id": "Qwen/Qwen3.8-27B",
+      "revision": "gguf-sha256:31629f53165ab6a7dad8c9847dcfd1fdf55829dac1e6e748f4a68581b0033d34"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+# LoRA experiments
+
+`series_00_legacy_adapters` contains historical recovery and evaluation tools. The original archives and mixed historical reports remain in `.legacy/` and ignored local result folders as evidence. New model discovery accepts three-class adapters only.
+
+`series_01_coordinate_search` runs the stages in this order: target modules, rank, learning rate, alpha, dropout, then the comparison with untuned LLMs. The modules are `LCD.experiments.lora.series_01_coordinate_search.target_modules`, `.rank`, `.learning_rate`, `.alpha`, `.dropout`, and `.compare_llm`. Invoke each with `python -m`; use `--dry-run` on the target-modules stage before training. Each stage may need repeated invocations until its saved state says completed.
+
+The completed `lora_coordinate_balanced_val` run is historical. Its internal original ID, 44 adapters, checkpoints, score files, and hashes are retained. The next run ID is `lora_coordinate_imbalanced_val`. It uses `local/data/classification/train.csv` and the imbalanced `val.csv`, the same pinned base-model and `dms-rag` revisions and five grids, and an entirely new run directory. It evaluates only the `Full` benchmark and computes validation plus Full `autotest_model` scores. Winner selection uses validation macro F1, then contradiction F1, invalid-prediction count, and grid order; Full scores never select winners. `autotest_total` is not calculated in this search because premise retrieval is fixed.
+
+Start the new run with the target-modules stage. Historical adapters and checkpoints are never imported. A run interrupted after training begins may resume only a checkpoint from its own recipe directory after the saved configuration is validated. The search records code, prompt, dataset, selected benchmark, scoring scope, model revisions, corpus revision, seeds, and settings. Use a new run ID if any locked input or setting changes.

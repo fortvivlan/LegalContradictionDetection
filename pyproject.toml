@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "legal-contradiction-detection"
+version = "0.1.0"
+description = "Utilities and experiments for contradiction detection in Russian legal texts."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "openpyxl>=3.1,<4",
+    "pandas>=2.2,<4",
+    "python-docx>=1.1,<2",
+    "razdel>=0.5,<1",
+    "scikit-learn>=1.4,<2",
+    "tqdm>=4.66,<5",
+]
+
+[project.optional-dependencies]
+ml = [
+    "accelerate>=1.2,<2",
+    "bitsandbytes>=0.45,<1",
+    "datasets>=3.2,<5",
+    "faiss-cpu>=1.9,<2",
+    "langchain-community>=0.3,<1",
+    "langchain-huggingface>=0.1,<2",
+    "langchain-text-splitters>=0.3,<2",
+    "peft>=0.13,<1",
+    "sentence-transformers>=3.3,<6",
+    "torch>=2.4,<3",
+    "transformers>=4.51,<5",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8,<10",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+include = ["LCD*"]
