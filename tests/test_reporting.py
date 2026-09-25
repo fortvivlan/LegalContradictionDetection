@@ -97,6 +97,69 @@ def test_document_review_package_separates_multi_dataset_duplicate_names(
         }
 
 
+def test_document_review_package_avoids_long_temporary_workbook_paths(
+    tmp_path: Path, monkeypatch
+) -> None:
+    padding = max(2, 195 - len(str(tmp_path)) - 2)
+    first = min(padding // 2, 80)
+    second = min(padding - first, 80)
+    output_dir = tmp_path / ("a" * first) / ("b" * second)
+    pairs = pd.DataFrame(
+        [
+            {
+                "test_dataset": "Full",
+                "document": "Абдырахманов часть 5 статья 18.8_Готово.docx",
+                "task": "ternary",
+                "sentence_index": 0,
+                "hypothesis": "Sentence.",
+                "premise": "Premise.",
+                "source": "КоАП РФ: Статья 18.8.",
+                "retrieval_rank": 1,
+                "prediction": "contradiction",
+            }
+        ]
+    )
+    original_to_excel = pd.DataFrame.to_excel
+
+    def windows_limited_to_excel(self, excel_writer, *args, **kwargs):
+        if isinstance(excel_writer, (str, Path)) and len(str(excel_writer)) >= 260:
+            raise FileNotFoundError(excel_writer)
+        return original_to_excel(self, excel_writer, *args, **kwargs)
+
+    monkeypatch.setattr(pd.DataFrame, "to_excel", windows_limited_to_excel)
+    archive_path = write_document_review_package("lora", pairs, output_dir=output_dir)
+
+    assert archive_path is not None
+    with ZipFile(archive_path) as archive:
+        assert archive.namelist() == [
+            "Full/Абдырахманов часть 5 статья 18.8_Готово_ternary_model_predictions.xlsx"
+        ]
+
+
+def test_document_review_package_shortens_windows_length_archive_path(
+    tmp_path: Path,
+) -> None:
+    padding = 174 - len(str(tmp_path)) - 2
+    output_dir = tmp_path / ("a" * min(padding, 80)) / ("b" * max(padding - 80, 1))
+    workflow = "lora_mistralai_Ministral-8B-Instruct-2410_ternary"
+    pairs = pd.DataFrame(
+        [{
+            "document": "decision.docx", "task": "ternary",
+            "sentence_index": 0, "hypothesis": "Sentence.",
+            "premise": "Premise.", "source": "КоАП РФ: Статья 1.",
+            "retrieval_rank": 1, "prediction": "contradiction",
+        }]
+    )
+
+    archive_path = write_document_review_package(workflow, pairs, output_dir=output_dir)
+
+    assert archive_path is not None
+    assert len(str(output_dir / f"{workflow}_document_review_20260924T180225Z.zip")) > 259
+    assert len(str(archive_path.resolve())) <= 259
+    with ZipFile(archive_path) as archive:
+        assert archive.namelist() == ["decision_ternary_model_predictions.xlsx"]
+
+
 def test_document_review_workbooks_remain_available_as_xlsx_files(
     tmp_path: Path,
 ) -> None:

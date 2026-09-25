@@ -8,9 +8,9 @@ Reusable extraction, retrieval, classification, evaluation, and XLSX-to-CSV conv
 
 | Group and series | Description | Status |
 | --- | --- | --- |
-| [Lawbook: embedding and reranking](LCD/experiments/lawbook/instructions.md) | Compare legal sentence embeddings, rerankers, retrieval depths, and citation resolution. The selected self-contained `rag-qwen` bundle is stored locally. | Completed series; reusable evaluation workflows |
-| [Lawbook: next retrieval series](LCD/experiments/lawbook/instructions.md) | Further premise-retrieval experiments on the lawbook corpus. | Planned |
+| [Lawbook: embedding and reranking](LCD/experiments/lawbook/series_01_embedding_reranking/README.md) | Test embeddings, rerankers, and retrieval depth; document the recall, runtime, and classifier-quality tradeoff. [Run instructions](LCD/experiments/lawbook/instructions.md). | Completed series; reusable evaluation workflows |
+| [Lawbook: next retrieval series](LCD/experiments/lawbook/series_02_planned/README.md) | Explore hybrid retrieval, adaptive final depth, richer embeddings, distillation, and late interaction. [Lawbook overview](LCD/experiments/lawbook/README.md) and [instructions](LCD/experiments/lawbook/instructions.md). | Planned |
 | [LoRA: legacy adapters](LCD/experiments/lora/instructions.md) | Historical adapters, recovery, and evaluation against baseline retrieval. | Historical |
-| [LoRA: coordinate search](LCD/experiments/lora/instructions.md) | Compare target modules, rank, learning rate, alpha, and dropout across four language models. `lora_coordinate_balanced_val` preserves the completed balanced-validation run; `lora_coordinate_imbalanced_val` is the next fresh run. | Historical run preserved; new run prepared |
+| [LoRA: coordinate search](LCD/experiments/lora/series_01_coordinate_search/README.md) | Study the effect of adapter settings across four language models and plan a domain shift comparison with prior BERT models and Qwen3.8-27B. [Run instructions](LCD/experiments/lora/instructions.md). | Historical run preserved; new run prepared |
 | [Document-context retrieval](LCD/experiments/document_context_retrieval/instructions.md) | Retrieve relevant passages from the court decision to add context to hypothesis checking. This planned series replaces the earlier summarization direction. | Planned |
 | [Baselines and comparisons](LCD/experiments/baselines/instructions.md) | BERT and untuned-LLM baselines, full-pipeline evaluations, LoRA/RAG comparisons, and a Qwen3.8 experiment. | Historical and reusable evaluation workflows |

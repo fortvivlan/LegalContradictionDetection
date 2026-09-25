@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
-import tempfile
 import zipfile
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -65,6 +66,21 @@ def _safe_artifact_name(value: str, *, limit: int = 80) -> str:
     """Return a readable filename component safe on common operating systems."""
     cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", value).strip(" ._")
     return (cleaned or "document")[:limit]
+
+
+def _review_archive_path(output_dir: Path, workflow_name: str, timestamp: str) -> Path:
+    """Fit a review ZIP below the traditional Windows 260-character path limit."""
+    suffix = f"_document_review_{timestamp}.zip"
+    available = 259 - len(str(output_dir.resolve())) - 1 - len(suffix)
+    if available < 9:
+        raise ValueError(
+            f"Review output directory is too long for a Windows ZIP path: {output_dir}"
+        )
+    safe_name = _safe_artifact_name(workflow_name)
+    if len(safe_name) > available:
+        digest = hashlib.sha256(workflow_name.encode("utf-8")).hexdigest()[:8]
+        safe_name = f"{safe_name[:available - 9]}_{digest}"
+    return output_dir / f"{safe_name}{suffix}"
 
 
 def _metadata_text(value: object) -> str:
@@ -136,23 +152,19 @@ def write_document_review_package(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    archive_path = output_dir / (
-        f"{_safe_artifact_name(workflow_name)}_document_review_{timestamp}.zip"
-    )
-    with tempfile.TemporaryDirectory(
-        prefix="jura_review_", dir=output_dir
-    ) as temporary_directory:
-        _write_document_review_workbooks(document_pairs, Path(temporary_directory))
-        with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
-            for workbook in sorted(Path(temporary_directory).rglob("*.xlsx")):
-                archive.write(
-                    workbook, arcname=workbook.relative_to(temporary_directory)
-                )
+    archive_path = _review_archive_path(output_dir, workflow_name, timestamp)
+    with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for relative_path, model_review in _document_review_tables(document_pairs):
+            workbook = BytesIO()
+            model_review.to_excel(
+                workbook, sheet_name="model_predictions", index=False
+            )
+            archive.writestr(relative_path.as_posix(), workbook.getvalue())
     return archive_path
 
 
-def _write_document_review_workbooks(document_pairs, target_dir: Path) -> list[Path]:
-    """Write review workbooks below an existing target directory."""
+def _document_review_tables(document_pairs):
+    """Yield archive-relative workbook paths and review tables."""
     required = {
         "document",
         "task",
@@ -170,7 +182,6 @@ def _write_document_review_workbooks(document_pairs, target_dir: Path) -> list[P
         )
     for task in document_pairs["task"].dropna().unique():
         validate_task(str(task))
-    target_dir.mkdir(parents=True, exist_ok=True)
     dataset_aware = "test_dataset" in document_pairs.columns and any(
         str(value) != "default"
         for value in document_pairs["test_dataset"].dropna().unique()
@@ -181,15 +192,13 @@ def _write_document_review_workbooks(document_pairs, target_dir: Path) -> list[P
         grouping.insert(0, "test_dataset")
         sort_columns.insert(0, "test_dataset")
     ordered = document_pairs.sort_values(sort_columns, kind="stable")
-    workbooks: list[Path] = []
     for group_key, document_rows in ordered.groupby(grouping, sort=False):
         if dataset_aware:
             dataset_name, document_name = group_key
-            dataset_directory = target_dir / _safe_artifact_name(str(dataset_name))
-            dataset_directory.mkdir(parents=True, exist_ok=True)
+            dataset_directory = Path(_safe_artifact_name(str(dataset_name)))
         else:
             document_name = group_key[0] if isinstance(group_key, tuple) else group_key
-            dataset_directory = target_dir
+            dataset_directory = Path()
         document_slug = _safe_artifact_name(Path(str(document_name)).stem)
         for task, task_rows in document_rows.groupby("task", sort=False):
             model_review = task_rows.loc[
@@ -211,13 +220,23 @@ def _write_document_review_workbooks(document_pairs, target_dir: Path) -> list[P
             )
             model_review["expert_label"] = ""
             model_review["expert_comment"] = ""
-            model_path = dataset_directory / (
+            relative_path = dataset_directory / (
                 f"{document_slug}_{_safe_artifact_name(str(task))}_model_predictions.xlsx"
             )
-            model_review.to_excel(
-                model_path, sheet_name="model_predictions", index=False
-            )
-            workbooks.append(model_path)
+            yield relative_path, model_review
+
+
+def _write_document_review_workbooks(document_pairs, target_dir: Path) -> list[Path]:
+    """Write review workbooks below an existing target directory."""
+    target_dir.mkdir(parents=True, exist_ok=True)
+    workbooks: list[Path] = []
+    for relative_path, model_review in _document_review_tables(document_pairs):
+        model_path = target_dir / relative_path
+        model_path.parent.mkdir(parents=True, exist_ok=True)
+        model_review.to_excel(
+            model_path, sheet_name="model_predictions", index=False
+        )
+        workbooks.append(model_path)
     return workbooks
 
 

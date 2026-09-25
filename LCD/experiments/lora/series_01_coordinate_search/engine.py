@@ -33,6 +33,11 @@ ALL_MODELS = ("qwen", "llama", "ministral", "t-lite")
 ALL_TASKS = ("ternary",)
 DEFAULT_SWEEP_TASKS = ("ternary",)
 DEFAULT_SEARCH_ID = "lora_coordinate_imbalanced_val"
+# The first run reached review packaging after training, then hit MAX_PATH on Windows.
+# Permit this one report-only source migration while retaining its old fingerprint.
+REPORT_PATH_FIX_PREVIOUS_SOURCE_SHA256 = "e7fea880cd6e1cac4d5254e7f87a0f12768b93d4d4d7a4ed690f4cf541336407"
+# The in-memory ZIP fix still left the final ZIP path over Windows MAX_PATH.
+REPORT_FILENAME_FIX_PREVIOUS_SOURCE_SHA256 = "05c312504fbed9107a409940f39819ee23b32f2ab4f88329393735f91b0584b7"
 PINNED_RAG_REVISION = "e6eab944161e1266c1b4452f172a9a725b1abe97"
 PINNED_MODEL_REVISIONS = {
     "qwen": "b968826d9c46dd6066d109eabc6255188de91218",
@@ -296,9 +301,31 @@ def _load_or_create_state(
         if state.get("search_id") != search_id:
             raise ValueError(f"Search state does not match {search_id!r}: {path}")
         if state.get("configuration") != configuration:
-            raise ValueError(
-                "The search ID belongs to different code, inputs, scope, or settings"
+            saved_configuration = state.get("configuration")
+            saved_without_source = dict(saved_configuration or {})
+            current_without_source = dict(configuration)
+            saved_source = saved_without_source.pop("source_tree_sha256", None)
+            current_source = current_without_source.pop("source_tree_sha256", None)
+            if not (
+                search_id == DEFAULT_SEARCH_ID
+                and saved_source in {
+                    REPORT_PATH_FIX_PREVIOUS_SOURCE_SHA256,
+                    REPORT_FILENAME_FIX_PREVIOUS_SOURCE_SHA256,
+                }
+                and saved_without_source == current_without_source
+            ):
+                raise ValueError(
+                    "The search ID belongs to different code, inputs, scope, or settings"
+                )
+            state.setdefault("source_migrations", []).append(
+                {
+                    "at": _utc_now(),
+                    "reason": "Keep review ZIP creation within the Windows path limit",
+                    "previous_source_tree_sha256": saved_source,
+                    "source_tree_sha256": current_source,
+                }
             )
+            state["configuration"] = dict(configuration)
         for experiment in state.get("experiments", {}).values():
             if experiment.get("status") == "running":
                 experiment["status"] = "interrupted"

@@ -261,6 +261,53 @@ def test_latest_checkpoint_uses_highest_numeric_step(tmp_path: Path) -> None:
     assert sweep._latest_checkpoint(tmp_path) == tmp_path / "checkpoint-100"
 
 
+@pytest.mark.parametrize(
+    "previous_source",
+    [
+        sweep.REPORT_PATH_FIX_PREVIOUS_SOURCE_SHA256,
+        sweep.REPORT_FILENAME_FIX_PREVIOUS_SOURCE_SHA256,
+    ],
+)
+def test_report_path_fix_preserves_in_progress_search(
+    tmp_path: Path, previous_source: str
+) -> None:
+    state_path = tmp_path / "search_state.json"
+    previous_configuration = {
+        "models": ["qwen"],
+        "source_tree_sha256": previous_source,
+    }
+    state_path.write_text(
+        json.dumps(
+            {
+                "search_id": sweep.DEFAULT_SEARCH_ID,
+                "configuration": previous_configuration,
+                "experiments": {"recipe": {"status": "running"}},
+                "comparison": {"models": {}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    current_configuration = {**previous_configuration, "source_tree_sha256": "new"}
+
+    state = sweep._load_or_create_state(
+        state_path,
+        search_id=sweep.DEFAULT_SEARCH_ID,
+        configuration=current_configuration,
+        root=tmp_path,
+    )
+
+    assert state["configuration"] == current_configuration
+    assert state["experiments"]["recipe"]["status"] == "interrupted"
+    assert state["source_migrations"][0]["previous_source_tree_sha256"] == previous_source
+    with pytest.raises(ValueError, match="different code, inputs"):
+        sweep._load_or_create_state(
+            state_path,
+            search_id=sweep.DEFAULT_SEARCH_ID,
+            configuration={**current_configuration, "models": ["llama"]},
+            root=tmp_path,
+        )
+
+
 def test_each_lora_model_uses_imbalanced_val_and_full_only(monkeypatch, tmp_path: Path) -> None:
     state = _state()
     candidates = sweep.build_stage_candidates("target_modules", state)
