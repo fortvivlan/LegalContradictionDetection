@@ -5,6 +5,7 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pandas as pd
+import pytest
 
 from LCD.shared import lora
 from LCD.shared.common import merge_parameters
@@ -21,6 +22,33 @@ def test_existing_lora_defaults_remain_the_current_recipe() -> None:
     assert defaults["optimizer"] == "auto"
     assert defaults["eval_strategy"] == "no"
     assert defaults["save_strategy"] == "no"
+
+
+def test_validation_mismatch_reuse_rejects_changed_training_settings(
+    monkeypatch, tmp_path: Path
+) -> None:
+    train = tmp_path / "train.csv"
+    val = tmp_path / "val.csv"
+    train.write_text("training", encoding="utf-8")
+    val.write_text("validation", encoding="utf-8")
+    manifest = {
+        "hyperparameters": dict(lora.DEFAULT_LORA_HYPERPARAMETERS),
+        "validation_sha256": "previous-validation",
+    }
+    monkeypatch.setattr(lora, "load_saved_artifact_manifest", lambda *args, **kwargs: manifest)
+    with pytest.raises(ValueError, match="unchanged adapter settings"):
+        lora.run(
+            "qwen", "ternary", {"lora_rank": 32},
+            train_path=train, val_path=val, artifact_root=tmp_path,
+            use_existing_model=True, allow_validation_mismatch=True,
+        )
+    manifest["hyperparameters"]["load_best_model_at_end"] = True
+    with pytest.raises(ValueError, match="checkpoint that was not selected"):
+        lora.run(
+            "qwen", "ternary",
+            train_path=train, val_path=val, artifact_root=tmp_path,
+            use_existing_model=True, allow_validation_mismatch=True,
+        )
 
 
 def test_tokenized_rows_dataset_is_pickleable() -> None:

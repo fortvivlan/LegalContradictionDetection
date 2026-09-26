@@ -27,6 +27,8 @@ Repeat `compare_llm` if it pauses. The comparison starts only after dropout comp
 
 Sweep stages retry a failed recipe once immediately by default. When investigating a failure, use `--max-retries 0` to stop after the first failure; rerunning later uses the saved adapter if its manifest matches the recipe. Review ZIP workbooks are assembled in memory, and long ZIP filenames are shortened to fit the Windows path limit.
 
+When a later stage repeats the same training settings, it reuses a completed adapter from this search. If that earlier adapter's validation hash differs from the later recipe's recorded hash, the adapter is scored again on the current validation file. Reuse is limited to runs that did not select their final checkpoint using validation. The later recipe receives its own validation and `Full` scores; the original adapter and its manifest remain in place.
+
 Training uses `train.csv`; model validation and stage winner selection use only `val.csv`. The winner is chosen by validation **contradiction F1**, then fewer invalid predictions, then grid order. Test scoring uses only the `Full` dataset and its `autotest_model` scope; it does not choose winners. `autotest_total` is excluded because premise retrieval is fixed in this search.
 
 Progress is saved under `local/experiments/lora/series_01_coordinate_search/lora_coordinate_imbalanced_val/results/search_state.json`; stage workbooks are in its `stages/<stage>/results.xlsx` folders. Rerun with the same search ID, code, inputs, model set, and training settings to resume. You may change `--nruns` or `--max-retries` between invocations. If any locked input or training setting changes, use a new `--search-id` for all stages of the new search.

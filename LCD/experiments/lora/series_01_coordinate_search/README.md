@@ -2,7 +2,7 @@
 
 This experiment studies how much adaptation a base language model needs to classify a court ruling and a lawbook provision as `contradiction`, `entailment`, or `not mentioned`. It varies where and how strongly LoRA changes the model, then compares the selected adapter with its untuned base model. The same models will later be tested for robustness when the legal articles change.
 
-The current search covers Qwen3-8B, Llama-3.1-8B, Ministral-8B-Instruct-2410, and T-lite-it-2.1. It is a **staged coordinate search**: each stage tests a small grid for one setting and passes its winner to the next stage. It does not evaluate every combination of all settings. Winners are selected separately for each model using validation contradiction F1; ties favor fewer invalid predictions, then grid order.
+The current search covers Qwen3-8B, Llama-3.1-8B, Ministral-8B-Instruct-2410, and T-lite-it-2.1. It is a **staged coordinate search**: each stage tests a small grid for one setting and passes its winner to the next stage. It does not evaluate every combination of all settings. Identical training settings reuse an adapter from an earlier stage of the same search; each validation-data version receives its own scores. Winners are selected separately for each model using validation contradiction F1; ties favor fewer invalid predictions, then grid order.
 
 | Stage | Candidates | What it probes |
 | --- | --- | --- |

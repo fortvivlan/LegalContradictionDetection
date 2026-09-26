@@ -38,6 +38,9 @@ DEFAULT_SEARCH_ID = "lora_coordinate_imbalanced_val"
 REPORT_PATH_FIX_PREVIOUS_SOURCE_SHA256 = "e7fea880cd6e1cac4d5254e7f87a0f12768b93d4d4d7a4ed690f4cf541336407"
 # The in-memory ZIP fix still left the final ZIP path over Windows MAX_PATH.
 REPORT_FILENAME_FIX_PREVIOUS_SOURCE_SHA256 = "05c312504fbed9107a409940f39819ee23b32f2ab4f88329393735f91b0584b7"
+# This change reuses an adapter when only the validation file changed. Keep the
+# already-running search resumable while retaining its previous code fingerprint.
+ADAPTER_REUSE_PREVIOUS_SOURCE_SHA256 = "8e64b0d9953b57e69b68a088a2a06df41f21a739f5ebce0ff73342629a8c15ae"
 PINNED_RAG_REVISION = "e6eab944161e1266c1b4452f172a9a725b1abe97"
 PINNED_MODEL_REVISIONS = {
     "qwen": "b968826d9c46dd6066d109eabc6255188de91218",
@@ -311,6 +314,7 @@ def _load_or_create_state(
                 and saved_source in {
                     REPORT_PATH_FIX_PREVIOUS_SOURCE_SHA256,
                     REPORT_FILENAME_FIX_PREVIOUS_SOURCE_SHA256,
+                    ADAPTER_REUSE_PREVIOUS_SOURCE_SHA256,
                 }
                 and saved_without_source == current_without_source
             ):
@@ -320,7 +324,11 @@ def _load_or_create_state(
             state.setdefault("source_migrations", []).append(
                 {
                     "at": _utc_now(),
-                    "reason": "Keep review ZIP creation within the Windows path limit",
+                    "reason": (
+                        "Reuse compatible adapters when validation data changes"
+                        if saved_source == ADAPTER_REUSE_PREVIOUS_SOURCE_SHA256
+                        else "Keep review ZIP creation within the Windows path limit"
+                    ),
                     "previous_source_tree_sha256": saved_source,
                     "source_tree_sha256": current_source,
                 }
@@ -509,7 +517,9 @@ def _adapter_target(
 ) -> Path:
     spec = resolve_model(experiment["model_alias"])
     return (
-        _experiment_artifact_root(artifact_root, experiment["recipe_id"])
+        _experiment_artifact_root(
+            artifact_root, experiment.get("adapter_recipe_id", experiment["recipe_id"])
+        )
         / "models"
         / "lora"
         / slugify_model_id(spec.model_id)
@@ -521,6 +531,8 @@ def _adapter_matches(
     artifact_root: Path,
     experiment: Mapping[str, Any],
     state: Mapping[str, Any],
+    *,
+    allow_validation_mismatch: bool = False,
 ) -> bool:
     from LCD.shared.inference import SOURCE_PREFIXED_PREMISE_FORMAT
     from LCD.shared.lora import _prompt_processing_strategy
@@ -536,6 +548,8 @@ def _adapter_matches(
         manifest = json.loads((target / "run_config.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return False
+    if allow_validation_mismatch and not manifest.get("validation_sha256"):
+        return False
     task = experiment["task"]
     config = state["configuration"]
     expected = {
@@ -543,7 +557,6 @@ def _adapter_matches(
         "task": task,
         "resolved_revision": state["pins"]["model_revisions"][experiment["model_alias"]],
         "train_sha256": config["dataset_sha256"][f"train_{task}"],
-        "validation_sha256": config["dataset_sha256"][f"val_{task}"],
         "prompt_sha256": config["prompt_sha256"][task],
         "prompt_processing": _prompt_processing_strategy(
             experiment["model_alias"]
@@ -552,7 +565,37 @@ def _adapter_matches(
         "rag_revision": state["pins"]["rag_revision"],
         "hyperparameters": experiment["parameters"],
     }
+    if not allow_validation_mismatch:
+        expected["validation_sha256"] = config["dataset_sha256"][f"val_{task}"]
     return all(manifest.get(key) == value for key, value in expected.items())
+
+
+def _reusable_adapter_recipe_id(
+    artifact_root: Path,
+    experiment: Mapping[str, Any],
+    state: Mapping[str, Any],
+) -> str | None:
+    """Find a completed adapter in this search with the same training recipe.
+
+    Validation can differ only when it cannot select a training checkpoint.
+    The new recipe still receives its own validation and benchmark scores.
+    """
+    if experiment["parameters"].get("load_best_model_at_end"):
+        return None
+    for source in state["experiments"].values():
+        if source["recipe_id"] == experiment["recipe_id"] or source["status"] != "completed":
+            continue
+        if (
+            source["model_alias"] != experiment["model_alias"]
+            or source["task"] != experiment["task"]
+            or source["parameters"] != experiment["parameters"]
+        ):
+            continue
+        if _adapter_matches(
+            artifact_root, source, state, allow_validation_mismatch=True
+        ):
+            return source.get("adapter_recipe_id", source["recipe_id"])
+    return None
 
 
 def _latest_checkpoint(trainer_dir: Path) -> Path | None:
@@ -622,6 +665,17 @@ def _run_experiment(
     experiment_results = result_root / "experiments" / recipe_id
     trainer_dir = experiment_results / "trainer"
     use_existing = _adapter_matches(artifact_root, experiment, state)
+    allow_validation_mismatch = False
+    if not use_existing:
+        reusable_recipe_id = _reusable_adapter_recipe_id(
+            artifact_root, experiment, state
+        )
+        if reusable_recipe_id is not None:
+            experiment["adapter_recipe_id"] = reusable_recipe_id
+            use_existing = True
+            allow_validation_mismatch = True
+        else:
+            experiment.pop("adapter_recipe_id", None)
     checkpoint = None if use_existing else _latest_checkpoint(trainer_dir)
     return run_lora(
         experiment["model_alias"],
@@ -631,9 +685,12 @@ def _run_experiment(
         val_path=root / "local" / "data" / "classification" / "val.csv",
         rag_dir=_rag_path(root),
         rag_revision=state["pins"]["rag_revision"],
-        artifact_root=_experiment_artifact_root(artifact_root, recipe_id),
+        artifact_root=_experiment_artifact_root(
+            artifact_root, experiment.get("adapter_recipe_id", recipe_id)
+        ),
         revision=state["pins"]["model_revisions"][experiment["model_alias"]],
         use_existing_model=use_existing,
+        allow_validation_mismatch=allow_validation_mismatch,
         autotest_dir=root / "local" / "data" / "benchmarks" / "autotest",
         test_docx_dir=root / "local" / "data" / "benchmarks" / "test_docx",
         score_autotest=True,

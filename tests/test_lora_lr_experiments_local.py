@@ -253,6 +253,80 @@ def test_adapter_reuse_requires_complete_matching_manifest(tmp_path: Path) -> No
     assert not sweep._adapter_matches(tmp_path, experiment, state)
 
 
+def test_rank_rescores_existing_adapter_after_validation_file_change(
+    monkeypatch, tmp_path: Path
+) -> None:
+    state = _state(models=("qwen",), tasks=("ternary",))
+    _complete_with_label(state, "target_modules", "all_linear")
+    source = next(
+        experiment for experiment in state["experiments"].values()
+        if experiment["parameters"]["target_modules"] == "all-linear"
+    )
+    source["status"] = "completed"
+    target = sweep._adapter_target(tmp_path / "artifacts", source)
+    target.mkdir(parents=True)
+    for name in ("adapter_config.json", "tokenizer_config.json"):
+        (target / name).write_text("{}", encoding="utf-8")
+    (target / "adapter_model.safetensors").write_bytes(b"adapter")
+    (target / "run_config.json").write_text(
+        json.dumps(
+            {
+                "model_id": resolve_model("qwen").model_id,
+                "task": "ternary",
+                "resolved_revision": state["pins"]["model_revisions"]["qwen"],
+                "train_sha256": "train-ternary",
+                "validation_sha256": "val-ternary",
+                "prompt_sha256": "prompt-ternary",
+                "prompt_processing": "standard_chat_template_v1",
+                "premise_format": "source_prefixed_v1",
+                "rag_revision": "b" * 40,
+                "hyperparameters": source["parameters"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    state["configuration"]["dataset_sha256"]["val_ternary"] = "new-val-ternary"
+    ranks = sweep.build_stage_candidates("rank", state)
+    sweep._register_stage(state, "rank", ranks)
+    candidate = next(candidate for candidate in ranks if candidate.label == "r_16")
+    experiment = state["experiments"][
+        sweep._recipe_id("qwen", "ternary", candidate.parameters, state)
+    ]
+    assert experiment["recipe_id"] != source["recipe_id"]
+    assert not sweep._adapter_matches(tmp_path / "artifacts", source, state)
+
+    run_lora = Mock(return_value=pd.DataFrame())
+    monkeypatch.setattr("LCD.shared.lora.run", run_lora)
+    sweep._run_experiment(
+        experiment,
+        root=tmp_path,
+        artifact_root=tmp_path / "artifacts",
+        result_root=tmp_path / "results",
+        state=state,
+    )
+
+    assert experiment["adapter_recipe_id"] == source["recipe_id"]
+    assert sweep._adapter_target(tmp_path / "artifacts", experiment) == target
+    assert run_lora.call_args.kwargs["use_existing_model"] is True
+    assert run_lora.call_args.kwargs["allow_validation_mismatch"] is True
+    assert run_lora.call_args.kwargs["val_path"] == tmp_path / "local/data/classification/val.csv"
+    assert run_lora.call_args.kwargs["artifact_root"] == target.parents[3]
+    assert sweep._reusable_adapter_recipe_id(tmp_path / "artifacts", experiment, state) == source["recipe_id"]
+
+
+def test_changed_validation_cannot_reuse_checkpoint_selected_by_validation(
+    tmp_path: Path,
+) -> None:
+    state = _state(models=("qwen",), tasks=("ternary",))
+    candidates = sweep.build_stage_candidates("target_modules", state)
+    sweep._register_stage(state, "target_modules", candidates)
+    source = next(iter(state["experiments"].values()))
+    source["status"] = "completed"
+    new = {**source, "recipe_id": "different", "parameters": dict(source["parameters"])}
+    new["parameters"]["load_best_model_at_end"] = True
+    assert sweep._reusable_adapter_recipe_id(tmp_path, new, state) is None
+
+
 def test_latest_checkpoint_uses_highest_numeric_step(tmp_path: Path) -> None:
     (tmp_path / "checkpoint-9").mkdir()
     (tmp_path / "checkpoint-100").mkdir()
@@ -266,9 +340,10 @@ def test_latest_checkpoint_uses_highest_numeric_step(tmp_path: Path) -> None:
     [
         sweep.REPORT_PATH_FIX_PREVIOUS_SOURCE_SHA256,
         sweep.REPORT_FILENAME_FIX_PREVIOUS_SOURCE_SHA256,
+        sweep.ADAPTER_REUSE_PREVIOUS_SOURCE_SHA256,
     ],
 )
-def test_report_path_fix_preserves_in_progress_search(
+def test_supported_source_fix_preserves_in_progress_search(
     tmp_path: Path, previous_source: str
 ) -> None:
     state_path = tmp_path / "search_state.json"

@@ -555,6 +555,7 @@ def run(
     artifact_root: str | Path = DEFAULT_ARTIFACT_ROOT,
     revision: str | None = None,
     use_existing_model: bool = False,
+    allow_validation_mismatch: bool = False,
     document_paths: Sequence[str | Path] | None = None,
     autotest_dir: str | Path = DEFAULT_AUTOTEST_DIR,
     test_docx_dir: str | Path = DEFAULT_TEST_DOCX_DIR,
@@ -579,10 +580,14 @@ def run(
     function returns the combined validation and autotest score table.
     ``trainer_output_dir`` optionally isolates Trainer checkpoints and logs.
     ``resume_from_checkpoint`` resumes a compatible interrupted Trainer run.
+    ``allow_validation_mismatch`` permits scoring an existing adapter on a new
+    validation file; it does not permit a different training set or settings.
     Set ``training_only=True`` to save the adapter and skip validation, RAG
     loading, document inference, and result-workbook generation.
     """
     validated_task = validate_task(task)
+    if allow_validation_mismatch and not use_existing_model:
+        raise ValueError("allow_validation_mismatch requires use_existing_model")
     spec = resolve_model(model_name)
     prompt_processing = _prompt_processing_strategy(spec.alias)
     workflow = f"lora/{spec.alias}/{validated_task}"
@@ -607,6 +612,16 @@ def run(
             "reuse",
             f"Checking the previously trained adapter at {adapter_target}.",
         )
+        expected_manifest = {
+            "model_id": spec.model_id,
+            "task": validated_task,
+            "train_sha256": train_hash,
+            "prompt_sha256": current_prompt_hash,
+            "prompt_processing": prompt_processing,
+            "premise_format": SOURCE_PREFIXED_PREMISE_FORMAT,
+        }
+        if not allow_validation_mismatch:
+            expected_manifest["validation_sha256"] = val_hash
         artifact_manifest = load_saved_artifact_manifest(
             adapter_target,
             required_files=(
@@ -615,23 +630,29 @@ def run(
                 "tokenizer_config.json",
             ),
             weight_files=("adapter_model.safetensors", "adapter_model.bin"),
-            expected={
-                "model_id": spec.model_id,
-                "task": validated_task,
-                "train_sha256": train_hash,
-                "validation_sha256": val_hash,
-                "prompt_sha256": current_prompt_hash,
-                "prompt_processing": prompt_processing,
-                "premise_format": SOURCE_PREFIXED_PREMISE_FORMAT,
-            },
+            expected=expected_manifest,
         )
         stored_parameters = artifact_manifest.get("hyperparameters")
         if not isinstance(stored_parameters, dict):
             raise ValueError(
                 f"Saved LoRA manifest has no hyperparameters: {adapter_target}"
             )
+        if allow_validation_mismatch and not artifact_manifest.get("validation_sha256"):
+            raise ValueError("Saved LoRA manifest has no validation hash")
         parameters = merge_parameters(DEFAULT_LORA_HYPERPARAMETERS, stored_parameters)
-        parameters = merge_parameters(parameters, hyperparameters)
+        requested_parameters = merge_parameters(parameters, hyperparameters)
+        if allow_validation_mismatch and (
+            requested_parameters != parameters
+            or (
+                artifact_manifest.get("validation_sha256") != val_hash
+                and parameters["load_best_model_at_end"]
+            )
+        ):
+            raise ValueError(
+                "Validation-data reuse requires unchanged adapter settings and "
+                "a checkpoint that was not selected by validation"
+            )
+        parameters = requested_parameters
     else:
         parameters = merge_parameters(DEFAULT_LORA_HYPERPARAMETERS, hyperparameters)
     configure_reproducibility(
