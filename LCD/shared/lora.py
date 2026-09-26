@@ -67,9 +67,9 @@ DEFAULT_LORA_HYPERPARAMETERS: dict[str, Any] = {
     "lora_alpha": 32,
     "lora_dropout": 0.05,
     "target_modules": "all-linear",
-    "max_seq_length": 1024,
-    "batch_size": 2,
-    "gradient_accumulation_steps": 8,
+    "max_seq_length": 2560,
+    "batch_size": 1,
+    "gradient_accumulation_steps": 16,
     "epochs": 3,
     "learning_rate": 2e-4,
     "lr_scheduler_type": "cosine",
@@ -111,15 +111,6 @@ def _prompt_processing_strategy(model_alias: str) -> str:
     )
 
 
-def _common_prefix_length(left: list[int], right: list[int]) -> int:
-    length = 0
-    for left_id, right_id in zip(left, right):
-        if left_id != right_id:
-            break
-        length += 1
-    return length
-
-
 def _tokenize_training_rows(
     dataframe,
     tokenizer,
@@ -128,7 +119,11 @@ def _tokenize_training_rows(
     *,
     model_alias: str,
 ):
-    """Tokenize SFT rows while preserving both prompt context and label tokens."""
+    """Tokenize complete SFT rows and supervise only assistant response tokens.
+
+    Raise when a row exceeds the configured context instead of silently losing
+    instructions, the source-prefixed premise, or the hypothesis.
+    """
     from tqdm.auto import tqdm
 
     prompt_processing = _prompt_processing_strategy(model_alias)
@@ -137,34 +132,32 @@ def _tokenize_training_rows(
         if prompt_processing == MINISTRAL_PROMPT_PROCESSING
         else build_training_texts
     )
+    if max_length <= 0:
+        raise ValueError("max_seq_length must be positive")
     rows: list[dict[str, list[int]]] = []
-    for row in tqdm(
+    for index, row in enumerate(tqdm(
         dataframe.itertuples(index=False),
         total=len(dataframe),
         desc=f"Formatting {task} training data",
-    ):
+    )):
         model_premise = format_model_premise(row.premise, row.source)
         prompt, full = build_texts(
             tokenizer, model_premise, row.hypothesis, row.tag, task
         )
         prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
         full_ids = tokenizer(full, add_special_tokens=False)["input_ids"]
-        common_length = _common_prefix_length(prompt_ids, full_ids)
-        response_ids = full_ids[common_length:]
+        row_id = getattr(row, "example_id", index)
+        if full_ids[: len(prompt_ids)] != prompt_ids:
+            raise ValueError(f"Training example {row_id} is not an exact prompt continuation")
+        response_ids = full_ids[len(prompt_ids) :]
         if not response_ids:
-            response_ids = tokenizer(
-                f" {row.tag}{tokenizer.eos_token or ''}", add_special_tokens=False
-            )["input_ids"]
-        response_ids = response_ids[:max_length]
-        prompt_budget = max_length - len(response_ids)
-        if len(prompt_ids) > prompt_budget:
-            prefix_length = prompt_budget // 2
-            suffix_length = prompt_budget - prefix_length
-            prompt_ids = (
-                prompt_ids[:prefix_length]
-                + (prompt_ids[-suffix_length:] if suffix_length else [])
+            raise ValueError(f"Training example {row_id} has no assistant-label tokens")
+        if len(full_ids) > max_length:
+            raise ValueError(
+                f"Training example {row_id} needs {len(full_ids)} tokens; "
+                f"max_seq_length is {max_length}"
             )
-        input_ids = prompt_ids + response_ids
+        input_ids = full_ids
         labels = [-100] * len(prompt_ids) + list(response_ids)
         if not any(label != -100 for label in labels):
             raise ValueError("Training example has no assistant-label tokens")
@@ -227,6 +220,7 @@ def _train_adapter(
         model = prepare_model_for_kbit_training(
             model,
             use_gradient_checkpointing=bool(parameters["gradient_checkpointing"]),
+            gradient_checkpointing_kwargs={"use_reentrant": False},
         )
     model = get_peft_model(
         model,

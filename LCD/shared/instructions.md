@@ -9,3 +9,10 @@ Audit validation and reviewed Full examples against training with `python -m LCD
 The full pipeline extracts sentences after the last `ПОСТАНОВИЛ` marker, resolves citations before semantic fallback, and writes row-level source and prediction evidence. Use the baseline group's full-pipeline runner with explicit `--models-source`, `--rag-source`, and `--results-dir` paths. Model lists must contain three-class jobs. New evaluations select the `Full` benchmark by default; pass another dataset explicitly only for historical reproduction.
 
 The environment token is read from `HF_TOKEN` or `HUGGING_FACE_HUB_TOKEN` only when needed. Pin model and corpus revisions in run metadata. Keep generated workbooks, checkpoints, and input documents under ignored local directories.
+
+Shared LoRA training uses complete prompt-plus-label examples with a default
+2,560-token context, a microbatch of one, and 16 gradient accumulation steps.
+It raises an error identifying any row that exceeds `max_seq_length`; adjust
+the configurable limit and memory settings for other datasets. The baseline
+group's [LoRA run instructions](../experiments/baselines/instructions.md)
+describe the new four-model comparison workflow.
