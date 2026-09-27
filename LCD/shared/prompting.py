@@ -22,13 +22,17 @@ def build_messages(
     *,
     assistant_label: str | None = None,
     prompt_text: str | None = None,
+    document_context: str | None = None,
 ) -> list[dict[str, str]]:
     """Build chat messages without duplicating the system prompt."""
+    user_content = f"Предпосылка: {premise}\nГипотеза: {hypothesis}"
+    if document_context is not None:
+        user_content = f"Контекст: {document_context}\n{user_content}"
     messages = [
         {"role": "system", "content": prompt_text or prompt_for_task(task)},
         {
             "role": "user",
-            "content": f"Предпосылка: {premise}\nГипотеза: {hypothesis}",
+            "content": user_content,
         },
     ]
     if assistant_label is not None:
@@ -69,11 +73,13 @@ def build_generation_prompt(
     task: Task,
     *,
     prompt_text: str | None = None,
+    document_context: str | None = None,
 ) -> str:
     """Build one inference prompt from the canonical imported task prompt."""
     return apply_chat_template(
         tokenizer,
-        build_messages(premise, hypothesis, task, prompt_text=prompt_text),
+        build_messages(premise, hypothesis, task, prompt_text=prompt_text,
+                       document_context=document_context),
         add_generation_prompt=True,
     )
 
@@ -84,14 +90,18 @@ def build_training_texts(
     hypothesis: str,
     label: str,
     task: Task,
+    *,
+    document_context: str | None = None,
 ) -> tuple[str, str]:
     """Return prompt-only and prompt-plus-label strings for response-only loss."""
     if label not in LABELS_BY_TASK[task]:
         raise ValueError(f"Invalid {task} label: {label!r}")
-    prompt = build_generation_prompt(tokenizer, premise, hypothesis, task)
+    prompt = build_generation_prompt(tokenizer, premise, hypothesis, task,
+                                     document_context=document_context)
     full = apply_chat_template(
         tokenizer,
-        build_messages(premise, hypothesis, task, assistant_label=label),
+        build_messages(premise, hypothesis, task, assistant_label=label,
+                       document_context=document_context),
         add_generation_prompt=False,
     )
     return prompt, full
