@@ -1,6 +1,6 @@
 # Series 02: planned retrieval improvements
 
-This series is planned. Its aim is to recover relevant lawbook provisions without sending an unnecessarily large set of premises to the contradiction classifier. The following are candidate directions, not a fixed implementation plan:
+This series is deferred while dataset creation and 8k LoRA training are the current goals. Its aim is to recover relevant lawbook provisions without sending an unnecessarily large set of premises to the contradiction classifier. The following are candidate directions, not a fixed implementation plan:
 
 1. Combine Qwen-based semantic retrieval and BM25 with explicit article-reference matches. Fuse ranked candidates with reciprocal rank fusion (RRF), include reference matches, then apply a tuned reranker.
 2. Choose the final number of premises adaptively for each hypothesis instead of always returning 60.

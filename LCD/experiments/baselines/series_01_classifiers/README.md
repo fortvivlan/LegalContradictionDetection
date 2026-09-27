@@ -1,6 +1,6 @@
 # Full-context LoRA baseline retraining
 
-This series reruns the four ternary baseline LoRAs with the original baseline
+This historical series can rerun the four ternary baseline LoRAs with the original baseline
 adapter recipe and complete training examples. The shared trainer now allows
 2,560 tokens, uses a microbatch of one with 16 accumulation steps, and errors
 if a prompt, source-prefixed premise, hypothesis, or response would be cut.
@@ -16,3 +16,5 @@ balanced coordinate-search winners. The campaign's saved `Full` score has
 shows support counts and avoids cross-cohort improvement claims.
 
 Commands and input paths are in the [baseline instructions](../instructions.md).
+It is retained for reproduction and is not the current 8k LoRA experiment;
+that goal is described in [classifiers](../../classifiers/README.md).

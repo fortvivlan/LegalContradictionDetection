@@ -1,6 +1,6 @@
 # LoRA coordinate search
 
-This experiment studies how much adaptation a base language model needs to classify a court ruling and a lawbook provision as `contradiction`, `entailment`, or `not mentioned`. It varies where and how strongly LoRA changes the model, then compares the selected adapter with its untuned base model. The same models will later be tested for robustness when the legal articles change.
+This historical experiment studied how much adaptation a base language model needs to classify a court ruling and a lawbook provision as `contradiction`, `entailment`, or `not mentioned`. It varied where and how strongly LoRA changed the model, then compared the selected adapter with its untuned base model. Further grid search is abandoned as a current direction; the scripts and results remain archived as historical evidence.
 
 The historical search covered Qwen3-8B, Llama-3.1-8B, Ministral-8B-Instruct-2410, and T-lite-it-2.1. It was a **staged coordinate search**: each stage tested a small grid for one setting and passed its winner to the next stage. It did not evaluate every combination of all settings. Identical training settings reused an adapter from an earlier stage of the same search; each validation-data version received its own scores. Winners were selected separately for each model using validation contradiction F1; ties favored fewer invalid predictions, then grid order.
 
@@ -14,10 +14,6 @@ The historical search covered Qwen3-8B, Llama-3.1-8B, Ministral-8B-Instruct-2410
 
 Training used `train.csv`; stage selection used only `val.csv`. The `Full` benchmark's `autotest_model` scope provided a separate test score and did not select winners. The saved comparison evaluated each winning LoRA adapter against its matching untuned base model with the same inference settings.
 
-## Planned domain shift evaluation
+The [data-creation experiment](../../data_creation/README.md) now defines the new expert-reviewed splits. The [8k classifier experiment](../../classifiers/README.md) is the current LoRA goal; it does not resume this search or import its adapters.
 
-An expert is preparing a new test set with the same task design but different legal articles. Once available, it will be held out from training and hyperparameter selection. Comparing performance on the current and new test sets will show how well the learned decision behavior transfers to articles outside the present data.
-
-The planned comparison includes the selected LoRA models, BERT models from previous runs, and the untuned Qwen3.8-27B baseline. Qwen3.8-27B is distinct from the Qwen3-8B model in the coordinate search. The new test set and its results are not yet part of this experiment's current scores.
-
-The original scripts are under `.legacy/lora_experiments/series_01_coordinate_search/`; [LoRA instructions](../instructions.md) explain the archive. Their adapters remain historical evidence and are not reused in new full-context training.
+The original scripts are under `.legacy/lora_experiments/series_01_coordinate_search/`; [LoRA instructions](../instructions.md) explain the archive. Their adapters remain historical evidence and are not reused in the planned 8k training.

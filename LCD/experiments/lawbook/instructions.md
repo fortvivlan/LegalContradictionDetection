@@ -6,4 +6,4 @@ Entry points are `python -m LCD.experiments.lawbook.series_01_embedding_rerankin
 
 The first series compares baseline and tuned embeddings, optional rerankers, and candidate/final retrieval depths. Citation matches retain priority over semantic candidates. Runs record corpus and model revisions and write ignored artifacts and results under `local/experiments/lawbook/series_01_embedding_reranking/`.
 
-`series_02_planned` is reserved for the next lawbook retrieval experiment. Its [README](series_02_planned/README.md) lists candidate directions; no final design or runner has been selected yet.
+`series_02_planned` is deferred. Its [README](series_02_planned/README.md) lists candidate directions; no final design or runner has been selected yet.

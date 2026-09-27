@@ -6,12 +6,15 @@ Reusable extraction, retrieval, classification, evaluation, and XLSX-to-CSV conv
 
 ## Experiments
 
-| Group and series | Description | Status |
+| Experiment | Description and instructions | Status |
 | --- | --- | --- |
-| [Lawbook: embedding and reranking](LCD/experiments/lawbook/series_01_embedding_reranking/README.md) | Test embeddings, rerankers, and retrieval depth; document the recall, runtime, and classifier-quality tradeoff. [Run instructions](LCD/experiments/lawbook/instructions.md). | Completed series; reusable evaluation workflows |
-| [Lawbook: next retrieval series](LCD/experiments/lawbook/series_02_planned/README.md) | Explore hybrid retrieval, adaptive final depth, richer embeddings, distillation, and late interaction. [Lawbook overview](LCD/experiments/lawbook/README.md) and [instructions](LCD/experiments/lawbook/instructions.md). | Planned |
-| [LoRA: legacy adapters](LCD/experiments/lora/series_00_legacy_adapters/README.md) | Historical adapters, recovery, and evaluation against baseline retrieval. [Archive instructions](LCD/experiments/lora/instructions.md). | Archived |
-| [LoRA: coordinate search](LCD/experiments/lora/series_01_coordinate_search/README.md) | Historical staged tuning across four language models. [Archive instructions](LCD/experiments/lora/instructions.md). | Archived |
-| [Document-context retrieval](LCD/experiments/document_context_retrieval/instructions.md) | Retrieve relevant passages from the court decision to add context to hypothesis checking. This planned series replaces the earlier summarization direction. | Planned |
-| [Baseline LoRA retraining](LCD/experiments/baselines/series_01_classifiers/README.md) | Retrain four LoRAs with complete context and compare with three saved cohorts. [Run instructions](LCD/experiments/baselines/instructions.md). | Ready to run |
-| [Baselines and comparisons](LCD/experiments/baselines/instructions.md) | BERT and untuned-LLM baselines, full-pipeline evaluations, LoRA/RAG comparisons, and a Qwen3.8 experiment. | Historical and reusable evaluation workflows |
+| [Data creation](LCD/experiments/data_creation/README.md) | Rebuild expert-reviewed train, dev, and test sets from original court rulings, with a separate appeal-evidence pool. [Instructions](LCD/experiments/data_creation/instructions.md). | Current goal; protocol documented, workflow not implemented |
+| [Classifiers: 8k LoRA context](LCD/experiments/classifiers/README.md) | Establish an 8,192-token training update on a 24 GB GPU, then train using rebuilt datasets. [Instructions](LCD/experiments/classifiers/instructions.md). | Current goal; protocol documented, workflow not implemented |
+| [Lawbook: embedding and reranking](LCD/experiments/lawbook/series_01_embedding_reranking/README.md) | Historical embedding, reranking, and retrieval-depth study. [Instructions](LCD/experiments/lawbook/instructions.md). | Completed |
+| [Lawbook: next retrieval series](LCD/experiments/lawbook/series_02_planned/README.md) | Candidate improvements to lawbook retrieval. [Instructions](LCD/experiments/lawbook/instructions.md). | Deferred |
+| [Document-context retrieval](LCD/experiments/document_context_retrieval/series_01_planned/README.md) | Retrieve passages from court decisions to supplement hypothesis checking. [Instructions](LCD/experiments/document_context_retrieval/instructions.md). | Deferred |
+| [LoRA: legacy adapters](LCD/experiments/lora/series_00_legacy_adapters/README.md) | Historical adapter recovery and evaluation. [Archive instructions](LCD/experiments/lora/instructions.md). | Archived |
+| [LoRA: coordinate search](LCD/experiments/lora/series_01_coordinate_search/README.md) | Historical staged hyperparameter search; no further grid search is planned. [Archive instructions](LCD/experiments/lora/instructions.md). | Abandoned as a current direction; archives preserved |
+| [Baseline classifiers and LoRA retraining](LCD/experiments/baselines/series_01_classifiers/README.md) | Historical classifier campaign and separate full-context retraining workflow. [Instructions](LCD/experiments/baselines/instructions.md). | Historical; runnable for reproduction |
+| [LoRA/RAG comparison](LCD/experiments/baselines/series_02_lora_rag_comparison/README.md) | Historical three-class adapter evaluation and comparison. [Instructions](LCD/experiments/baselines/instructions.md). | Historical; reusable evaluator |
+| [Qwen3.8 evaluation](LCD/experiments/baselines/series_03_qwen38/README.md) | Model-list configuration for the existing full-pipeline evaluator. [Instructions](LCD/experiments/baselines/instructions.md). | Historical configuration |

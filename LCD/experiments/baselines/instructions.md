@@ -1,5 +1,8 @@
 # Baselines and comparisons
 
+These runnable workflows are retained for historical reproduction and comparison.
+The current classifier goal is the separate [8k LoRA experiment](../classifiers/README.md).
+
 `series_01_classifiers` contains the three-class BERT, untuned-LLM, and LoRA baseline campaign and the full-pipeline evaluator. Use `python -m LCD.experiments.baselines.series_01_classifiers.run_campaign --help` or `python -m LCD.experiments.baselines.series_01_classifiers.full_pipeline_evaluation --help`. New runs use `local/data/classification/train.csv` and `val.csv`, the local benchmark `Full` folder, and explicit ignored output directories. Historical reports are preserved under the matching ignored series directories.
 
 ## Full-context LoRA baseline retraining
