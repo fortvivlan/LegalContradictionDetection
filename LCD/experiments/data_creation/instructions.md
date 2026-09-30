@@ -1,10 +1,32 @@
 # Data-creation instructions
 
-This is the protocol for the planned local Python workflow; there is no runnable data-creation CLI yet. Expert-selected articles and contradiction-modification rules are required inputs. Do not substitute agent-chosen articles or rules.
+Expert-selected articles are now available for document collection. Contradiction-modification rules remain an expert input for later dataset construction. Do not substitute agent-chosen articles or rules.
+
+## Collection scope and sources
+
+- Main article group: `18.8`, `18.9`, `18.10`, `18.11`, `18.12`, `18.15`, `18.16`, `18.17`, `18.18`, `18.19`, `18.20`, `19.27` КоАП РФ. Collect at least 1,000 distinct original judicial rulings across this group, seeking broad coverage and at least roughly ten per article where published decisions permit.
+- Domain-shift group: `20.20`, `20.21`, `6.9` КоАП РФ. Collect about 30 original rulings, aiming at roughly ten per article. Keep this pool separate as test candidates; do not place its cases into train or dev.
+- Collect final decisions on complaints separately for **both** groups, aiming for 5–10 per article where available. An appeal is evidence for expert review, not an original ruling or an automatically labeled contradiction.
+
+Available public sources include [ГАС «Правосудие»](https://sudrf.ru/), which links to federal general-jurisdiction courts and magistrates; the [Moscow courts search](https://mos-gorsud.ru/mgs/search), which includes administrative-offence cases and review proceedings; [SudAct general courts](https://sudact.ru/regular/) and [SudAct magistrates](https://sudact.ru/magistrate/); and [ZakonRF's court-act archive](https://www.zakonrf.info/gorsud/). The current automated collectors use SudAct. Check official court portals and other public archives for coverage gaps and provenance confirmation where feasible. Record the exact document URL and source for every saved item. Search result titles, case-number prefixes, and page headings are discovery hints only; acceptance depends on the full published text. Use polite request intervals, bounded retries, and resume from saved provenance.
+
+Store collected material under ignored `local/data/classification/dataset0929/decisions/` and `local/data/classification/dataset0929/appeals/`. Within each, keep `main/` and `domain_shift/` separate, then an article-number folder containing DOCX copies. Retain the original published HTML or text and a provenance manifest with retrieval time, source URL, article, court, case identifier, document type, content hash, and the passages supporting acceptance. Record inaccessible pages and shortages; never fill a target with duplicates, incomplete documents, or a different article.
+
+Run the local collectors from the repository root with the project Python environment:
+
+```bash
+./.venv/bin/python -m LCD.experiments.data_creation.collect_originals --group all \
+  --count-main 1000 --count-domain-shift 30 --minimum-per-article 10
+./.venv/bin/python -m LCD.experiments.data_creation.collect_appeals --group all \
+  --target 5 --max-pages 8
+./.venv/bin/python -m LCD.experiments.data_creation.audit_collection
+```
+
+Both commands are resumable against their provenance manifests. Use `--help` for search depth, timeouts, request intervals, year or article selection, and output paths. The DOCX files are text copies of published acts; the corresponding HTML and plain-text files preserve the fetched source. Inspect `provenance.csv` and `failures.csv` before expert review. A shortfall is a source-availability or retrieval result, not permission to include a document that fails the checks below.
 
 ## Collection and expert review
 
-1. Human experts provide the target legal articles. Subagents find original Russian court rulings concerning those articles from accessible internet sources. Record a stable source URL, retrieval date, document identifier, and full text or a local copy for expert review.
+1. The original-rulings collector finds first-instance *постановления о привлечении к административной ответственности* under the selected articles. The published text must identify a КоАП РФ case, apply the target article in the final `ПОСТАНОВИЛ` section, and give an actual disposition such as guilt and penalty. Reject complaint reviews even when titled `Постановление`. The Chapter 30 complaint requirements below do not apply to original rulings. Record a stable source URL, retrieval date, document identifier, and full text or a local copy for expert review.
 2. Subagents separately collect final court decisions on complaints against administrative-offence rulings under Chapter 30 of the КоАП РФ. The appeal pool supports expert analysis of errors and does not become the source-document corpus. Record any verified link to an original ruling, but matching is not required.
 3. Subagents document the text passages supporting every appeal's inclusion. Human experts review the candidate rulings and appeals, and select corpus rulings before splitting them.
 

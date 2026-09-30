@@ -8,7 +8,7 @@ Reusable extraction, retrieval, classification, evaluation, and XLSX-to-CSV conv
 
 | Experiment | Description and instructions | Status |
 | --- | --- | --- |
-| [Data creation](LCD/experiments/data_creation/README.md) | Rebuild expert-reviewed train, dev, and test sets from original court rulings, with a separate appeal-evidence pool. [Instructions](LCD/experiments/data_creation/instructions.md). | Current goal; protocol documented, workflow not implemented |
+| [Data creation](LCD/experiments/data_creation/README.md) | Rebuild expert-reviewed train, dev, and test sets from original court rulings, with a separate appeal-evidence pool. [Instructions](LCD/experiments/data_creation/instructions.md). | Candidate documents collected; expert review pending |
 | [Classifiers: Qwen3-8B full-document training](LCD/experiments/classifiers/series_01_qwen3_full_document/README.md) | Copy reviewed `Full` pairs with source decisions; prepare an 8k QLoRA trainer and disposable exact-length probe. [Classifier catalogue](LCD/experiments/classifiers/README.md); [Instructions](LCD/experiments/classifiers/instructions.md). | Export complete; first 8k probe exceeded GPU memory; training pending |
 | [Lawbook: embedding and reranking](LCD/experiments/lawbook/series_01_embedding_reranking/README.md) | Historical embedding, reranking, and retrieval-depth study. [Instructions](LCD/experiments/lawbook/instructions.md). | Completed |
 | [Lawbook: next retrieval series](LCD/experiments/lawbook/series_02_planned/README.md) | Candidate improvements to lawbook retrieval. [Instructions](LCD/experiments/lawbook/instructions.md). | Deferred |
