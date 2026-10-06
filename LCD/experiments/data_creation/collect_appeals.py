@@ -8,7 +8,7 @@ Example::
 
     python -m LCD.experiments.data_creation.collect_appeals \
         --output local/data/classification/dataset0929/appeals \
-        --transport curl --target 5
+        --transport curl --target 30
 """
 
 from __future__ import annotations
@@ -171,14 +171,17 @@ def parse_sudact_page(page: str, document_id: str, url: str) -> PublishedDecisio
 
 
 def article_pattern(article: str) -> re.Pattern[str]:
-    """Build a boundary-safe pattern for a КоАП article number."""
+    """Match an explicit article citation, never a bare date or case number.
+
+    The article designator is mandatory. Decimal subarticles (e.g. 18.11.1)
+    and longer numbers must not match their parent article.
+    """
 
     major, minor = article.split(".")
     number = rf"{re.escape(major)}\s*[.,]\s*{re.escape(minor)}"
     return re.compile(
-        rf"(?:ст(?:атья|атье|атьи|атью|атьёй|атьей)?\.?\s*{number}|"
-        rf"(?<![\d.,]){number}\s*(?:ст(?:атья|атье|атьи|атью|атьёй|атьей)?\.?)?)"
-        rf"(?!\s*\d)",
+        rf"(?<![\w])ст(?:атья|атье|атьи|атью|атьёй|атьей)?\.?\s*"
+        rf"{number}(?!\d|\s*[.,]\s*\d)",
         re.I,
     )
 
@@ -255,6 +258,23 @@ def verify_appeal(decision: PublishedDecision, article: str) -> Verification:
     if not chapter_match:
         return Verification(False, "Chapter 30 review is not established")
 
+    # A later review may recount a genuine complaint against the original
+    # постановление while the current complaint actually challenges a court's
+    # earlier решение or определение. Bind the complaint to the first act
+    # named in the published opening, before УСТАНОВИЛ.
+    opening_end = re.search(
+        r"У\s*С\s*Т\s*А\s*Н\s*О\s*В\s*И\s*Л(?:А)?\s*:??", text[:3500], re.I,
+    )
+    opening_preamble = text[:opening_end.start() if opening_end else 2500]
+    first_challenge = re.search(
+        r"жалоб\w*.{0,700}?\bна\s+(?:постановлени|решени|определени)\w*",
+        opening_preamble, re.I,
+    )
+    if first_challenge and re.search(
+        r"\bна\s+(?:решени|определени)\w*$", first_challenge.group(0), re.I,
+    ):
+        return Verification(False, "current complaint challenges a prior review decision")
+
     complaint_match, complaint_evidence = _find(
         text[: min(len(text), 7000)],
         r"рассмотр\w*.{0,1400}?(?:по\s+)?жалоб\w*.{0,800}?"
@@ -287,6 +307,35 @@ def verify_appeal(decision: PublishedDecision, article: str) -> Verification:
     complaint_preamble = text[complaint_match.start():preamble_end]
     preamble_article = target.search(complaint_preamble)
     operative_article = target.search(operative)
+    # A source can contain a typo in its opening. An explicit conflicting
+    # operative citation must not be overridden by a matching preamble.
+    operative_citations = re.findall(
+        r"(?<!\w)ст(?:атья|атье|атьи|атью|атьёй|атьей)?\.?\s*"
+        r"(\d+\s*[.,]\s*\d+(?:\s*[.,]\s*\d+)?)\s*"
+        r"(?:КоАП|Кодекс\w*\s+Российской\s+Федерации\s+об\s+административных)",
+        operative, re.I,
+    )
+    substantive_citations = {
+        re.sub(r"\s+", "", value).replace(",", ".")
+        for value in operative_citations
+        if not value.lstrip().startswith(("24.", "25.", "26.", "27.", "28.", "29.", "30.", "31.", "32."))
+    }
+    if substantive_citations and article not in substantive_citations:
+        return Verification(False, f"operative charge conflicts with article {article}")
+    # Some published acts repeat a wrong article in the opening and final
+    # lines while applying a different offence in the substantive analysis.
+    # The court's own finding of the offence is stronger evidence than those
+    # repeated labels; flag such acts for individual review.
+    reasoning = text[preamble_end:operative_markers[-1].start()]
+    factual_charge = re.search(
+        r"факт\s+совершения.{0,100}?правонарушения\s*,?\s*"
+        r"предусмотренного.{0,100}?ст(?:\.|ать\w*)?\s*(\d+\s*[.,]\s*\d+)",
+        reasoning, re.I | re.S,
+    )
+    if factual_charge:
+        reasoned_article = re.sub(r"\s+", "", factual_charge.group(1)).replace(",", ".")
+        if reasoned_article != article:
+            return Verification(False, f"substantive offence finding conflicts with article {article}")
     if preamble_article:
         article_evidence = _snippet(complaint_preamble, preamble_article)
     elif operative_article:
@@ -692,7 +741,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--article", action="append",
         help="limit collection to an article; may be repeated",
     )
-    parser.add_argument("--target", type=int, default=5)
+    parser.add_argument("--target", type=int, default=30)
     parser.add_argument("--max-pages", type=int, default=8)
     parser.add_argument("--delay", type=float, default=0.2)
     parser.add_argument("--timeout", type=int, default=30)

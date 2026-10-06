@@ -6,7 +6,7 @@ Expert-selected articles are now available for document collection. Contradictio
 
 - Main article group: `18.8`, `18.9`, `18.10`, `18.11`, `18.12`, `18.15`, `18.16`, `18.17`, `18.18`, `18.19`, `18.20`, `19.27` КоАП РФ. Collect at least 1,000 distinct original judicial rulings across this group, seeking broad coverage and at least roughly ten per article where published decisions permit.
 - Domain-shift group: `20.20`, `20.21`, `6.9` КоАП РФ. Collect about 30 original rulings, aiming at roughly ten per article. Keep this pool separate as test candidates; do not place its cases into train or dev.
-- Collect final decisions on complaints separately for **both** groups, aiming for 5–10 per article where available. An appeal is evidence for expert review, not an original ruling or an automatically labeled contradiction.
+- Collect final decisions on complaints separately for **both** groups, aiming for at least 30 verified appeals per article where published decisions permit and at least one for each article part where available. An appeal is evidence for expert review, not an original ruling or an automatically labeled contradiction.
 
 Available public sources include [ГАС «Правосудие»](https://sudrf.ru/), which links to federal general-jurisdiction courts and magistrates; the [Moscow courts search](https://mos-gorsud.ru/mgs/search), which includes administrative-offence cases and review proceedings; [SudAct general courts](https://sudact.ru/regular/) and [SudAct magistrates](https://sudact.ru/magistrate/); and [ZakonRF's court-act archive](https://www.zakonrf.info/gorsud/). The current automated collectors use SudAct. Check official court portals and other public archives for coverage gaps and provenance confirmation where feasible. Record the exact document URL and source for every saved item. Search result titles, case-number prefixes, and page headings are discovery hints only; acceptance depends on the full published text. Use polite request intervals, bounded retries, and resume from saved provenance.
 
@@ -18,11 +18,13 @@ Run the local collectors from the repository root with the project Python enviro
 ./.venv/bin/python -m LCD.experiments.data_creation.collect_originals --group all \
   --count-main 1000 --count-domain-shift 30 --minimum-per-article 10
 ./.venv/bin/python -m LCD.experiments.data_creation.collect_appeals --group all \
-  --target 5 --max-pages 8
+  --target 30 --max-pages 8
 ./.venv/bin/python -m LCD.experiments.data_creation.audit_collection
 ```
 
 Both commands are resumable against their provenance manifests. Use `--help` for search depth, timeouts, request intervals, year or article selection, and output paths. The DOCX files are text copies of published acts; the corresponding HTML and plain-text files preserve the fetched source. Inspect `provenance.csv` and `failures.csv` before expert review. A shortfall is a source-availability or retrieval result, not permission to include a document that fails the checks below.
+
+Run appeal searches into a separate staging directory. Before copying any candidate into the active `appeals/` collection, inspect its published opening, charged original ruling, complaint, substantive reasoning, and final operative ruling. Confirm that the *same* article and part govern the appealed ruling; dates such as `18.11.2025`, case numbers such as `3/18.19-33/2025`, historical citations, and source typos do not establish the target article. Record per-document acceptance evidence or rejection reasons. Keep missing parts and per-article shortfalls visible in the review report.
 
 ## Collection and expert review
 

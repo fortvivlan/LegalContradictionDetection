@@ -1,0 +1,11 @@
+# Series 03: update the premise-search lawbook
+
+Replace the current `dms-rag` lawbook corpus with the legal texts supplied by a human expert in `local/data/codes`. The initial files are КоАП РФ and federal laws 109-ФЗ, 114-ФЗ, and 115-ФЗ, each labelled edition 01.10.2026. Log each source file, its edition label, and SHA-256 so future premise retrieval can be traced to a specific corpus version.
+
+Before building the replacement database, audit the full text of `local/data/classification/dataset0929/decisions` (both main and domain-shift groups, excluding appeals) for federal-law references. Give the expert one representative sentence per identifiable law, retaining its source decision and preferring the first dated citation. Distinguish different laws sharing the same number using citation dates and titles; matching descriptive titles merge date variants for the same number. Keep every original matching sentence in a companion full export. Compare explicit law numbers with the supplied inventory to flag potential omissions; the expert must resolve references without numbers and confirm titles, dates, and relevant editions.
+
+The local audit is implemented. Expert review, any additional law files, and construction/integration of the replacement retrieval database remain pending. Explicit citations must retain priority over semantic retrieval, and premise reports must retain source and version provenance. See the [lawbook instructions](../instructions.md) for running the audit and locating its ignored outputs.
+
+The initial audit on 2026-10-06 scanned all 1,068 decision DOCX files and exported 5,260 matching sentence occurrences from 1,034 decisions. It flagged 34 explicit law numbers absent from the numbered-law filenames for expert review; 2,091 sentences had no explicit numbered ФЗ identifier. These are provisional coverage candidates: number-only matching does not resolve the КоАП title, distinguish laws with the same number in different years, or decide which amending laws belong in the future database.
+
+The compact expert export now retains 41 representative sentences covering 44 provisional law identities; sentences citing several laws are printed once. The original 5,260 occurrences remain available in `federal_law_sentences_full.txt`.

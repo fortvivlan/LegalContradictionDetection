@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
+import pytest
 from docx import Document
 
 from LCD.experiments.data_creation.collect_appeals import (
@@ -123,11 +124,77 @@ def test_verification_rejects_complaint_against_prior_review_decision() -> None:
     assert "prior review decision" in result.reason
 
 
+def test_verification_rejects_prior_review_named_before_original_in_opening() -> None:
+    body = (
+        "Судья, рассмотрев жалобу защитника на решение районного суда от 18 декабря "
+        "2025 года по делу, предусмотренному ч. 2 ст. 18.11 КоАП РФ. "
+        "УСТАНОВИЛ: постановлением начальника отдела Иванов признан виновным "
+        "по ч. 2 ст. 18.11 КоАП РФ. Защитник ранее обратился с жалобой на "
+        "постановление начальника отдела. Районный суд оставил постановление "
+        "без изменения. Руководствуясь ст. 30.7 КоАП РФ, суд РЕШИЛ: "
+        "решение районного суда и постановление начальника отдела по "
+        "ч. 2 ст. 18.11 КоАП РФ оставить без изменения, жалобу без удовлетворения. "
+        + "Обоснование. " * 30
+    )
+    result = verify_appeal(_decision(body), "18.11")
+    assert not result.accepted
+    assert "prior review decision" in result.reason
+
+
 def test_article_pattern_does_not_confuse_adjacent_articles() -> None:
     pattern = article_pattern("18.8")
     assert pattern.search("часть 1 статьи 18.8 КоАП РФ")
     assert not pattern.search("ст. 18.80 КоАП РФ")
     assert not pattern.search("ст. 118.8 КоАП РФ")
+
+
+@pytest.mark.parametrize("article, text", [
+    ("18.11", "постановление от 18.11.2025 по ст. 18.8 КоАП РФ"),
+    ("18.12", "постановление от 18.12. 2025 г. по ст. 20.21 КоАП РФ"),
+    ("18.19", "постановление №3/18.19-33/2025 по ч.1 ст. 8.8 КоАП РФ"),
+    ("18.11", "ст. 18.11.1 КоАП РФ"),
+    ("18.11", "ст. 18.110 КоАП РФ"),
+])
+def test_article_pattern_rejects_dates_identifiers_and_subarticles(article, text) -> None:
+    assert not article_pattern(article).search(text)
+
+
+@pytest.mark.parametrize("article, marker", [
+    ("18.11", "18.11.2025"),
+    ("18.12", "18.12. 2025 г."),
+    ("18.19", "№3/18.19-33/2025"),
+])
+def test_verification_rejects_non_citation_in_current_complaint(article, marker) -> None:
+    body = _accepted_body(
+        "Постановление по ч. 1 ст. 18.8 КоАП РФ оставить без изменения, "
+        "жалобу без удовлетворения."
+    ).replace("на постановление начальника отдела", f"на постановление начальника отдела {marker}")
+    assert not verify_appeal(_decision(body), article).accepted
+
+
+def test_verification_rejects_opening_typo_conflicting_with_operative_charge() -> None:
+    body = _accepted_body(
+        "Постановление по ч. 1 ст. 18.8 КоАП РФ оставить без изменения, "
+        "жалобу без удовлетворения."
+    ).replace("ч. 1 ст. 18.8 КоАП РФ", "ч. 1 ст. 18.18 КоАП РФ", 1)
+    result = verify_appeal(_decision(body), "18.18")
+    assert not result.accepted
+    assert "conflicts" in result.reason
+
+
+def test_verification_flags_matching_labels_with_conflicting_reasoned_offence() -> None:
+    body = _accepted_body(
+        "Постановление по ч. 3 ст. 18.19 КоАП РФ оставить без изменения, "
+        "жалобу без удовлетворения."
+    ).replace("ч. 1 ст. 18.8 КоАП РФ", "ч. 3 ст. 18.19 КоАП РФ")
+    body = body.replace(
+        "Суд исследовал доказательства и доводы сторон.",
+        "Факт совершения Ивановым административного правонарушения, "
+        "предусмотренного частью 3 статьей 18.9 КоАП РФ, подтвержден."
+    )
+    result = verify_appeal(_decision(body), "18.19")
+    assert not result.accepted
+    assert "substantive offence" in result.reason
 
 
 def test_search_polls_and_deduplicates() -> None:
