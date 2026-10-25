@@ -45,6 +45,44 @@ The expert appeal-search instructions are:
 >
 > **Ключевое правило:** не доверять заголовку документа. Нужно по тексту подтвердить три вещи: есть постановление по КоАП, есть жалоба именно на него, и есть итоговое решение по этой жалобе.
 
+## Apply the expert exclusions to original rulings
+
+`review_decisions` defaults to `decisions/main/`; `domain_shift/` and appeals remain separate. It reads the DOCX text, uses the final `ПОСТАНОВИЛ` section and the existing `razdel` splitter, and preserves the indices removed by the irrelevant-text filter. Federal-law checks deliberately precede that filter because the experts also exclude payment boilerplate citing independent federal laws. A named/numbered law in the reasoning alone does not meet this exclusion. Embedded references in a cited КоАП provision are recorded as allowed contexts; another independent federal-law citation in the same document still excludes it.
+
+The default `--ip-scope party` follows the clarified expert instruction: only the entrepreneur being prosecuted triggers criterion б. Check the opening and operative subject; an entrepreneur employer, witness, landlord, or generic statutory quotation does not suffice. `--ip-scope any` is available only for a deliberately broader review. Explicit expert exclusions are enforced for all eight supplied filenames, including the two documents with a detached departure explanation. Analogous uncited departure obligations are also checked. A payment warning or hypothetical future expulsion does not establish an imposed expulsion.
+
+Create the report in a **new directory outside `decisions/`**:
+
+```bash
+./.venv/bin/python -m LCD.experiments.data_creation.review_decisions \
+  --root local/data/classification/dataset0929/decisions \
+  --output local/data/classification/dataset0929/decision_review_NEW \
+  --ip-scope party
+```
+
+Inspect `review.xlsx`, `report.txt`, `summary.json`, and `plan.json`. Spacing and multiple-offence matches are candidates: brand-name capitalization, previous convictions, rejected joinder motions and generic legal quotations do not establish those exclusions. Record manual decisions in a local JSON object keyed by the exact manifest `filename`, for example:
+
+```json
+{
+  "main/18.15/example.docx": {
+    "note": "Joinder was refused; this ruling decides one episode.",
+    "reviewed_flags": ["possible_multiple_offences"]
+  }
+}
+```
+
+An entry may also specify `add_reasons`, `remove_reasons`, and `evidence` (reason code to passage list). Available reason codes are documented by `REASONS` in the module. These records describe the agent's application of the experts' criteria, not a new human expert sign-off. Regenerate into another new output directory with `--overrides path/to/review_overrides.json`; pending flags prevent application. The completed 2026-10-25 local review and its overrides are under `local/data/classification/dataset0929/decision_review_20261025/`.
+
+Apply a completed review with:
+
+```bash
+./.venv/bin/python -m LCD.experiments.data_creation.review_decisions \
+  --apply local/data/classification/dataset0929/decision_review_NEW/plan.json
+./.venv/bin/python -m LCD.experiments.data_creation.audit_collection
+```
+
+Application verifies the manifest and every reviewed DOCX/HTML/TXT hash before moving any files. Excluded bundles go to `decision_review_NEW/excluded/`, retaining their article directories and an independent `provenance.csv`. The active manifest contains only retained documents; its byte-for-byte original is in `before_review/provenance.csv`. `applied.json` records completion. On an ordinary move/write failure, the workflow rolls back completed moves and restores the original manifest. To reverse a completed review, move the archived bundles back using the original relative paths in `plan.json` and restore the saved manifest **only if no subsequent collection or curation has changed the active pool**. Do not resume a collector into this curated directory: use separate staging so excluded source URLs are not reintroduced.
+
 ## Split, transform, retrieve, and label
 
 1. Divide accepted **original rulings**, not individual sentences or premise pairs, into `train`, `dev`, and `test`. Keep duplicate copies and related decisions from the same case in one split. Keep the appeal evidence pool separate. Record the split assignment and seed.
