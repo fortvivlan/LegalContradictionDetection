@@ -83,13 +83,242 @@ Apply a completed review with:
 
 Application verifies the manifest and every reviewed DOCX/HTML/TXT hash before moving any files. Excluded bundles go to `decision_review_NEW/excluded/`, retaining their article directories and an independent `provenance.csv`. The active manifest contains only retained documents; its byte-for-byte original is in `before_review/provenance.csv`. `applied.json` records completion. On an ordinary move/write failure, the workflow rolls back completed moves and restores the original manifest. To reverse a completed review, move the archived bundles back using the original relative paths in `plan.json` and restore the saved manifest **only if no subsequent collection or curation has changed the active pool**. Do not resume a collector into this curated directory: use separate staging so excluded source URLs are not reintroduced.
 
-## Split, transform, retrieve, and label
+## Date cutoff for the main original-ruling pool
 
-1. Divide accepted **original rulings**, not individual sentences or premise pairs, into `train`, `dev`, and `test`. Keep duplicate copies and related decisions from the same case in one split. Keep the appeal evidence pool separate. Record the split assignment and seed.
-2. Extract hypotheses from the final `ПОСТАНОВИЛ` section using `razdel` sentence splitting and irrelevant-text filtering. Record the source sentence and any extraction or filtering exception. Experts approve changes to these rules before use.
-3. Apply expert-provided modification algorithms to create contradictory sentence candidates in each split. Retain the original sentence, transformed sentence, rule identifier, and human review outcome. In `train`, seek one modified hypothesis for every two unmodified ones; if valid modifications are scarce, reduce unmodified hypotheses. Do not force `dev` or `test` to a one-third modification rate.
-4. For **every** resulting hypothesis, run semantic lawbook retrieval and exact lookup for any explicit citation. Add exact-only results to semantic candidates; collapse the same provision returned by both routes into one pair, retaining both route names and source metadata. Keep unresolved citations visible for review.
-5. Propose a three-class label for every candidate pair. Human experts approve all `dev` and `test` labels and synthetic modifications. For `train`, they review a stratified sample across articles, labels, and modification rules and every flagged or uncertain case. Preserve proposed and reviewed values separately.
-6. Select eligible `train` pairs after the sample audit and flagged-case review toward 1:1:1; select expert-approved `dev` pairs toward approximately 60:20:20 (`not mentioned`: `entailment`: `contradiction`). Report the resulting counts and any shortage without inventing labels. Leave expert-approved `test` pairs unsampled, report their natural distribution, and note its distance from the hoped-for 70:25:5.
+The optional date filter defaults to retaining rulings dated **1 January 2024 onward**. The 2026-10-26 date-restricted collection was cancelled: the older rulings were restored and newly collected candidates were preserved. No date cutoff currently excludes those restored rulings. For a future date review, use the date printed in the opening, with an explicit archive-title date as fallback for anonymized openings. Search years and case-number years do not establish the ruling date. Inspect unresolved dates and any year disagreements in `plan.json` before applying. Use a new output directory outside `decisions/`:
 
-Future exports should preserve the existing classifier fields `premise`, `hypothesis`, `source`, and `tag`, alongside a provenance table linking each row to its document, URL, original sentence, modification rule, citation, retrieval routes, split, and review state. Put private inputs and outputs under ignored `local/` directories. The rebuilt splits are new inputs; historical `local/data/classification/val.csv` and benchmark `Full` remain separate.
+```bash
+./.venv/bin/python -m LCD.experiments.data_creation.filter_decisions_by_date \
+  --cutoff 2024-01-01 \
+  --output local/data/classification/dataset0929/decision_date_review_NEW
+./.venv/bin/python -m LCD.experiments.data_creation.filter_decisions_by_date \
+  --apply local/data/classification/dataset0929/decision_date_review_NEW/plan.json
+./.venv/bin/python -m LCD.experiments.data_creation.audit_collection
+```
+
+Removed DOCX/HTML/TXT bundles are preserved in the date review's `excluded/`, with their provenance and the original manifest in `before_review/`. Preserve the earlier expert exclusions. Collect replacements into separate staging directories, apply the experts' exclusions again, and block previously collected URLs, text hashes and case identities before importing. Keep date evidence alongside the import review; report any shortage honestly.
+
+## Build the portable NLI and RAG datasets
+
+The native Series 01 workflow operates on accepted **original rulings** and keeps
+appeals outside the dataset. It uses seed 42 to freeze 600/200/200 source
+documents into `train`, `val`, and `test`; duplicate or related cases stay in a
+single split. Run each command with `--help` before a production build and use a
+new ignored bundle directory:
+
+```bash
+./.venv/bin/python -m LCD.experiments.data_creation.series_01_nli_rag initialize \
+  --bundle local/data/classification/dataset0929/nli_rag_v1
+./.venv/bin/python -m LCD.experiments.data_creation.series_01_nli_rag prepare \
+  --bundle local/data/classification/dataset0929/nli_rag_v1 --split train
+./.venv/bin/python -m LCD.experiments.data_creation.series_01_nli_rag tasks \
+  --bundle local/data/classification/dataset0929/nli_rag_v1 \
+  --split train --kind annotate --batch-size 20
+```
+
+Repeat `prepare` and `tasks` for `val` and `test`. Create each kind explicitly:
+
+```bash
+./.venv/bin/python -m LCD.experiments.data_creation.series_01_nli_rag tasks \
+  --bundle local/data/classification/dataset0929/nli_rag_v1 \
+  --split train --kind generate --batch-size 1
+./.venv/bin/python -m LCD.experiments.data_creation.series_01_nli_rag tasks \
+  --bundle local/data/classification/dataset0929/nli_rag_v1 \
+  --split train --kind verify --batch-size 20
+```
+
+After independent verifier subagents return JSONL, import it explicitly for the
+same split:
+
+```bash
+./.venv/bin/python -m LCD.experiments.data_creation.series_01_nli_rag verify \
+  --bundle local/data/classification/dataset0929/nli_rag_v1 \
+  --split train --input local/path/to/verifications.jsonl
+```
+
+An independent `accept` records supporting evidence but leaves an annotation
+`proposed`; only a human review import can make it `approved`. `reject` and
+`needs_review` return the affected row to pending review. A pilot verification
+also caught a residual bank-detail hypothesis and partial entailment of compound
+claims. The annotation and verification contracts therefore require entailment
+support for the complete claim, contradiction when a supported incompatibility
+affects any material atom, and explicit `extraction_filter_residue` review for
+non-legal payment or bank fragments.
+
+Initialization copies every source to the assigned split as UTF-8 text and
+writes hashes and immutable assignments. Preparation extracts final
+`ПОСТАНОВИЛ` hypotheses, audits every filtered sentence, resolves exact citations
+first, fills semantic premises from `local/data/coderag`, and retrieves context.
+The default premise depth is 10 unique provisions, with a hard maximum of 20.
+Context retrieval uses Qwen with the exact instruction recorded in the
+[series README](series_01_nli_rag/README.md), excludes the hypothesis, and writes
+up to five sentences in document order.
+
+Only expert-table rows whose normalized October 2026 inclusion value is exactly
+`Да` enter task generation. Percentages are relative targets across feasible
+contradiction scenarios. Train may use two distinct variants of one hypothesis
+and several modified hypotheses from a source; `val` and `test` allow one active
+variant and one scenario per source. The targets are pair-weighted
+50/25/25 (`contradiction`/`entailment`/`not mentioned`) for train, about 120
+contradiction-bearing validation documents, and about 40 test documents.
+The coordinator persists each generation assignment before task export. One
+generation task names one source, one original hypothesis, and one selected
+expert rule; the agent must not choose among rules. Infeasible assignments return
+`needs_review` and remain visible as quota shortages until the coordinator makes
+a new assignment to an unused candidate.
+
+Give the generated tasks to subagents using the checked-in Russian contracts:
+
+- [`generate_variant.txt`](series_01_nli_rag/prompts/generate_variant.txt) for
+  offset-based changes to a copied decision;
+- [`annotate_pairs.txt`](series_01_nli_rag/prompts/annotate_pairs.txt) for
+  independent NLI and relevance judgments;
+- [`verify_proposals.txt`](series_01_nli_rag/prompts/verify_proposals.txt) for an
+  independent check.
+
+Apply an accepted variant proposal through the workflow rather than editing a
+TXT directly. The coordinator verifies `before` against the source offsets,
+writes a new `decisions/variants/` copy, and rebuilds all affected artifacts:
+
+```bash
+./.venv/bin/python -m LCD.experiments.data_creation.series_01_nli_rag apply-variant \
+  --bundle local/data/classification/dataset0929/nli_rag_v1 \
+  --input local/path/to/variant.jsonl
+# Rebuild pairs and context from the new copied variant.
+./.venv/bin/python -m LCD.experiments.data_creation.series_01_nli_rag prepare \
+  --bundle local/data/classification/dataset0929/nli_rag_v1 --split train
+./.venv/bin/python -m LCD.experiments.data_creation.series_01_nli_rag annotate \
+  --bundle local/data/classification/dataset0929/nli_rag_v1 \
+  --split train --input local/path/to/annotations.jsonl
+```
+
+The same `apply-variant` command records a subagent's `needs_review` response
+when it has an empty `edits` list and a concrete rationale. It does not edit a
+document in that case. Re-running `tasks --kind generate` preserves the failed
+assignment in the audit ledger, releases its reservation and tries another
+candidate without forcing a contradiction label. Excluded original pair IDs
+deactivate their old generation assignments instead of invalidating the ledger.
+
+The expert scenario is audit metadata, not a predetermined NLI label. Relevance
+is also separate: a relevant neutral pair may be `not mentioned` and `related`.
+Missing target provisions, insufficient context, conflicts, and uncertain legal
+application remain `needs_review`; do not add a target provision to retrieval or
+force a label to satisfy balance.
+
+## Human review, stable IDs, and export
+
+Run only one canonical writer (`prepare`, imports, filtering or export) for a
+bundle at a time. Subagents can read tasks and write their own proposal files
+while preparation runs. Keep agent outputs under the bundle's `agent_outputs/`
+directory so they survive session interruptions.
+
+For train, create a deterministic stratified human-review scope after annotation:
+
+```bash
+./.venv/bin/python -m LCD.experiments.data_creation.series_01_nli_rag review-plan \
+  --bundle local/data/classification/dataset0929/nli_rag_v1 --split train \
+  --fraction 0.1 --seed 42
+# Experts review human_review.csv; keep the untouched original export separately.
+./.venv/bin/python -m LCD.experiments.data_creation.series_01_nli_rag review \
+  --bundle local/data/classification/dataset0929/nli_rag_v1 --split train \
+  --sampled --input local/path/to/expert-reviewed-human_review.csv
+```
+
+The configurable default selects 10% from every populated premise-article,
+NLI-label and error-type stratum (at least one), plus every synthetic or flagged
+row. `--sampled` restricts deletion handling to the sampled snapshot; it does not
+exclude the rest of train. `human_review_pending.jsonl` contains uncertain rows;
+resolve or explicitly exclude those with `annotate --human` JSONL, including an
+independent relevance judgment and rationale. Relevance corrections also use
+human JSONL because relevance is stored in metadata. A completed audit permits
+release of the remaining proposed natural train rows. Val/test still require
+human approval of every included row. New unreviewed rows invalidate a train
+audit until its scope is refreshed.
+
+Use `prepare --device cuda --batch-size 16 --max-batch-tokens 8192` through the
+Windows interpreter for the local GPU. The padded-token limit prevents long
+provisions from causing shared-memory spillover and never truncates an input.
+Preparation resumes from completed document checkpoints. `refresh-filter` can
+exclude audited extraction remnants without reallocating existing row IDs;
+stale annotation imports may use `--skip-excluded` to preserve those exclusions.
+
+Inspect `preparation_review.jsonl` for hypotheses whose explicit citations exceed
+the twenty-premise limit. These cases are held for review rather than silently
+truncating their citations. After preparing edited decisions, run the target
+audit to compare the intended provision with the actual retrieved candidates:
+
+```bash
+./.venv/bin/python -m LCD.experiments.data_creation.series_01_nli_rag audit-targets \
+  --bundle local/data/classification/dataset0929/nli_rag_v1
+```
+
+`target_retrieval_review.jsonl` records missing target provisions. The audit never
+inserts a reference provision into retrieval results or assigns an NLI label.
+When generation tasks are refreshed, a validation/test variant with a missing
+target provision or disputed independent verification releases its planned
+positive-document slot for another source. Its existing copy and row history are
+retained, and its source cannot receive a second variant.
+The same applies when all retrieved target pairs have been annotated and none
+has a contradiction label; neutral examples are retained without counting them
+toward a positive-document target.
+Use `refresh-rules --expert-table PATH` to refresh supplementary expert comments
+without changing the pinned eligible rules or their core generation instructions.
+
+Export a draft CSV, let experts delete or reorder rows and correct permitted
+review fields, then import it with the review command. `row_id`, not line number,
+is the identity. The persistent registry never renumbers surviving rows and never
+reuses an ID deleted by an expert.
+
+```bash
+./.venv/bin/python -m LCD.experiments.data_creation.series_01_nli_rag export \
+  --bundle local/data/classification/dataset0929/nli_rag_v1 --split train
+# Experts edit the exported CSV files.
+./.venv/bin/python -m LCD.experiments.data_creation.series_01_nli_rag review \
+  --bundle local/data/classification/dataset0929/nli_rag_v1 \
+  --split train --input local/path/to/expert-edited.csv
+./.venv/bin/python -m LCD.experiments.data_creation.series_01_nli_rag validate \
+  --bundle local/data/classification/dataset0929/nli_rag_v1
+./.venv/bin/python -m LCD.experiments.data_creation.series_01_nli_rag export \
+  --bundle local/data/classification/dataset0929/nli_rag_v1 \
+  --split train --released
+```
+
+Repeat draft review and released export for `val` and `test`. The `annotate` and
+`review` commands deliberately require `--split`; this prevents a row from being
+silently imported into the wrong registry.
+
+Every split folder contains `{split}.csv`, `metadata.jsonl`,
+`sampling_weights.csv`, `manifest.json`, and `decisions/originals` and
+`decisions/variants` text directories. CSV columns are
+`row_id,hypothesis,premise,article_number,context,label,error_type,source_filename,decision_text_path`.
+The relative `decision_text_path` makes the folder movable. Release validation
+checks all referenced files and hashes and excludes unresolved rows. Human review
+is required for every synthetic variant and every `val`/`test` pair; review all
+uncertain train pairs and a stratified sample of the rest. Historical
+`local/data/classification/val.csv` and `Full` remain separate.
+
+## Load and sample a moved split
+
+Training consumers do not need the build registry. Point the portable loader at
+the CSV after moving the complete split directory; decision paths are resolved
+relative to the CSV. Sampling probabilities are recomputed from surviving rows,
+so an expert may delete or reorder CSV rows without invalidating IDs or retaining
+stale weights:
+
+```python
+from LCD.experiments.data_creation.series_01_nli_rag.loading import (
+    load_split, sample_row_ids, sampling_probabilities,
+)
+
+csv_path = "local/path/to/moved-train/train.csv"
+rows = load_split(csv_path)
+detection = sampling_probabilities(csv_path, task="detection")
+rag = sampling_probabilities(csv_path, task="rag")
+batch_ids = sample_row_ids(csv_path, task="detection", count=64, seed=42)
+```
+
+Detection requires all three NLI classes and targets 50/25/25. RAG reads
+`metadata.jsonl`, requires relevance for every surviving row plus both relevance
+classes, and targets 50/50. Missing classes or judgments fail explicitly; the
+loader never substitutes a fallback distribution. Sampling uses only Python's
+standard library and returns permanent `row_id` values with replacement.

@@ -8,7 +8,32 @@ The first series compares baseline and tuned embeddings, optional rerankers, and
 
 `series_02_planned` is deferred. Its [README](series_02_planned/README.md) lists candidate directions; no final design or runner has been selected yet.
 
-## Series 03: legal-code inventory and coverage audit
+## Series 03: КоАП CSVs and whole-unit FAISS retrieval
+
+Run from the repository root with the project's `ml` dependencies installed. The supplied native Windows interpreter has CUDA and FAISS available; in WSL substitute `/mnt/f/CODE/Python/Interpreters/python312/python.exe` for `python`. Its Windows process must have access to the repository and model download network. No hosted inference service is used.
+
+```bash
+python -m LCD.experiments.lawbook.series_03_code_update.build_coderag build \
+  --source 'local/data/codes/Кодекс Российской Федерации об административных правонарушениях_редакция 01.10.2026.docx' \
+  --output-dir local/data/coderag \
+  --model Qwen/Qwen3-Embedding-0.6B --device cuda --batch-size 8
+```
+
+The command reads only that DOCX. `extract` performs just CSV/audit export with no ML dependencies; `index` builds the index from an existing extraction. Use a fresh output directory to rebuild an indexed corpus. This prevents replacing its CSVs while retaining stale vectors. Input/model paths, immutable `--revision`, `--precision`, `--batch-size`, `--seed` and `--cache-dir` are configurable. The default cache is ignored `local/cache/huggingface/`. The resolved model revision and the exact agreed Qwen instruction are stored in `manifest.json`; `--local-files-only` requires a previously cached model. With `--model` pointing to a local model directory, record that local snapshot's provenance alongside the run.
+
+Outputs are UTF-8-with-BOM `koap_units.csv` (`text,source,hierarchy,changes`) and `koap_notes.csv` (`text,position`), `units.jsonl` preserving extraction metadata, `extraction_audit.json`, `manifest.json`, and `faiss_index/index.faiss` plus `faiss_index/units.jsonl`. All are under the selected output directory. The supplied edition yields 4,065 main rows and 270 notes. Inactive placeholders are excluded; notes are retained separately and never embedded. Every main row is one vector, including long units; excessive tokenizer lengths stop indexing with the affected citations. Qwen uses 1,024 dimensions, normalized vectors, automatic CUDA precision and batches of eight by default.
+
+```bash
+python -m LCD.experiments.lawbook.series_03_code_update.build_coderag search \
+  --output-dir local/data/coderag --device cuda --local-files-only \
+  --query 'Суд назначил иностранному гражданину административное выдворение.' --top-k 5
+```
+
+Search loads the matching model revision and query instruction from the manifest and returns complete premise text, citation, provenance, cosine score and retrieval method. It does not predict contradiction/entailment. Programmatic entry points are `export_corpus(source, output_dir)`, `build_index(corpus_dir, ...)`, and `CodeRagStore(corpus_dir, ...)` in `LCD.shared.coderag`. Call `store.exact_lookup("1.3", part="1", point="1")` for a known citation before `store.search(statement, top_k=10)` for semantic fallback. Omitting part/point returns the requested article's leaves; exact lookup does not initialize the encoder. Tests in `tests/test_coderag.py` use generated DOCX fixtures and mock encoders, with no model downloads or private data.
+
+Full-pipeline integration, lexical/regex search, reranking and retrieval-quality benchmarking remain separate work. The historical `dms-rag` corpus is not modified.
+
+### Earlier legal-code inventory and coverage audit
 
 The [code-update experiment](series_03_code_update/README.md) prepares expert review before replacing the premise-search corpus. From the repository root, with the project dependencies installed, run:
 
